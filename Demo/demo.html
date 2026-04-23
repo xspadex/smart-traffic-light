@@ -1,0 +1,2747 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鸿蒙智慧交通控制系统 | HarmonyOS Smart Traffic</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #0b1120;
+            --bg-panel: #151e32;
+            --primary: #0078d4;
+            --accent: #00ff9d;
+            --text-main: #ffffff;
+            --text-sub: #a0aec0;
+            --danger: #ff4d4f;
+            --warning: #faad14;
+            --success: #52c41a;
+            --harmony-orange: #ff9500;
+            --v2x-blue: #00d4ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+
+        /* 登录层 */
+        #login-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(11, 17, 32, 0.98); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(5px);
+        }
+        .login-box {
+            background: var(--bg-panel); padding: 40px; border-radius: 12px;
+            width: 420px; text-align: center; border: 1px solid var(--primary);
+            box-shadow: 0 0 30px rgba(0, 120, 212, 0.4);
+            position: relative; overflow: hidden;
+        }
+        .login-box::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+        }
+        .login-box input, .login-box select {
+            width: 100%; padding: 12px; margin: 10px 0;
+            background: #0b1120; border: 1px solid #333; color: white;
+            border-radius: 4px; outline: none;
+        }
+        .login-box input:focus { border-color: var(--primary); }
+        .login-box button {
+            width: 100%; padding: 12px; background: var(--primary);
+            border: none; color: white; cursor: pointer; font-weight: bold;
+            border-radius: 4px; transition: 0.3s;
+        }
+        .login-box button:hover { background: #0063b1; }
+        .login-status {
+            margin-top: 15px; font-size: 12px; color: var(--accent);
+            display: flex; align-items: center; justify-content: center; gap: 5px;
+            opacity: 0; transition: opacity 0.5s;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 260px; background: var(--bg-panel);
+            display: flex; flex-direction: column;
+            border-right: 1px solid #333;
+            z-index: 100;
+        }
+        .logo {
+            padding: 25px 20px; font-size: 18px; font-weight: bold;
+            border-bottom: 1px solid #333; color: var(--text-main);
+            display: flex; align-items: center; gap: 12px;
+            background: linear-gradient(180deg, rgba(0,120,212,0.1) 0%, rgba(0,0,0,0) 100%);
+        }
+        .logo i { color: var(--harmony-orange); }
+        .nav-items { flex: 1; padding: 20px 0; overflow-y: auto; }
+        .nav-item {
+            padding: 12px 20px; cursor: pointer;
+            color: var(--text-sub); transition: 0.3s;
+            display: flex; align-items: center; gap: 12px;
+            border-left: 3px solid transparent;
+            font-size: 13px;
+        }
+        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
+        .nav-item.active {
+            background: rgba(0, 120, 212, 0.15);
+            color: var(--text-main); border-left: 3px solid var(--primary);
+        }
+        .system-status {
+            padding: 20px; font-size: 11px; color: #666;
+            border-top: 1px solid #333; background: #0f1623;
+        }
+        .status-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .status-val { color: var(--success); }
+
+        /* 主内容区 */
+        .main-content { flex: 1; padding: 25px; overflow-y: auto; position: relative; }
+        .page { display: none; animation: fadeIn 0.4s ease-out; }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #333;
+        }
+        .header h2 { font-weight: 300; letter-spacing: 1px; }
+        .badge {
+            padding: 4px 8px; border-radius: 4px; font-size: 10px;
+            background: #333; color: #aaa; margin-left: 5px;
+        }
+        .badge.ok { background: rgba(82, 196, 26, 0.2); color: var(--success); border: 1px solid var(--success); }
+        .badge.v2x { background: rgba(0, 212, 255, 0.2); color: var(--v2x-blue); border: 1px solid var(--v2x-blue); }
+
+        /* 通用卡片 */
+        .card {
+            background: var(--bg-panel); border-radius: 8px;
+            padding: 20px; margin-bottom: 20px;
+            border: 1px solid #2a3b55;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .card-title { 
+            font-size: 13px; color: var(--text-sub); margin-bottom: 15px; 
+            text-transform: uppercase; letter-spacing: 0.5px;
+            display: flex; justify-content: space-between;
+        }
+        .card-value { font-size: 28px; font-weight: 600; color: var(--text-main); }
+        .card-sub { font-size: 12px; color: #666; margin-top: 5px; }
+
+        /* 1. 监控主界面 */
+        .monitor-grid {
+            display: grid; grid-template-columns: 2fr 1fr; gap: 20px; height: calc(100vh - 150px);
+        }
+        .video-container {
+            background: #000; position: relative; border-radius: 8px;
+            overflow: hidden; border: 1px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .video-feed {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        /* 视频标题叠加 */
+        .video-title-overlay {
+            position: absolute; top: 12px; left: 14px; z-index: 10;
+            pointer-events: none;
+        }
+        .video-title-overlay .title-main {
+            font-size: 22px; font-weight: bold; color: #fff;
+            text-shadow: 2px 2px 6px rgba(0,0,0,0.8);
+            font-family: 'Segoe UI', 'Arial', sans-serif;
+        }
+        .video-title-overlay .title-sub {
+            font-size: 15px; font-weight: 600; color: #ddd;
+            text-shadow: 2px 2px 6px rgba(0,0,0,0.8);
+            margin-top: 2px;
+        }
+        /* ROI 检测区域 */
+        .roi-zone {
+            position: absolute; pointer-events: none; z-index: 5;
+            box-sizing: border-box;
+        }
+        .roi-zone .roi-border {
+            width: 100%; height: 100%;
+            border: 2.5px solid;
+            box-sizing: border-box;
+        }
+        .roi-zone .roi-label {
+            position: absolute; top: -1px; left: -1px;
+            padding: 2px 8px;
+            font-family: 'Consolas', monospace;
+            font-size: 11px; font-weight: bold;
+            white-space: nowrap; line-height: 16px;
+        }
+        .roi-zone.roi-yellow .roi-border { border-color: #f5e642; }
+        .roi-zone.roi-yellow .roi-label { background: rgba(245,230,66,0.85); color: #000; }
+        .roi-zone.roi-cyan .roi-border { border-color: #00e5ff; }
+        .roi-zone.roi-cyan .roi-label { background: rgba(0,229,255,0.85); color: #000; }
+
+        /* YOLO 检测框 - 仿真实检测风格 */
+        .yolo-box {
+            position: absolute; pointer-events: none; z-index: 6;
+            animation: yoloFadeIn 0.25s ease-out;
+        }
+        .yolo-box .yolo-rect {
+            width: 100%; height: 100%;
+            border: 2px solid;
+            box-sizing: border-box;
+        }
+        .yolo-box .yolo-label {
+            position: absolute; top: -18px; left: -2px;
+            padding: 1px 5px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px; font-weight: bold;
+            white-space: nowrap;
+            line-height: 16px;
+        }
+        /* car / truck: 绿色 */
+        .yolo-box.cls-car .yolo-rect { border-color: #00e640; }
+        .yolo-box.cls-car .yolo-label { background: #00e640; color: #000; }
+        .yolo-box.cls-truck .yolo-rect { border-color: #00e640; }
+        .yolo-box.cls-truck .yolo-label { background: #00e640; color: #000; }
+        /* bus: 蓝色 */
+        .yolo-box.cls-bus .yolo-rect { border-color: #3b82f6; }
+        .yolo-box.cls-bus .yolo-label { background: #3b82f6; color: #fff; }
+        /* person: 红色 */
+        .yolo-box.cls-person .yolo-rect { border-color: #ef4444; }
+        .yolo-box.cls-person .yolo-label { background: #ef4444; color: #fff; }
+        @keyframes yoloFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* 板端信息叠加 (左上角第一行) */
+        .board-info-overlay {
+            position: absolute; top: 6px; left: 10px; z-index: 10;
+            font-family: 'Consolas', monospace; font-size: 13px;
+            font-weight: bold; color: #0f0;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
+            pointer-events: none;
+        }
+        /* ROI 手动标框工具栏 */
+        .roi-toolbar {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 6px; font-size: 12px;
+        }
+        .roi-toolbar .btn-roi {
+            padding: 5px 12px; border: 1px solid #555; border-radius: 4px;
+            background: #1e293b; color: #ccc; cursor: pointer; font-size: 11px;
+            transition: 0.2s; display: flex; align-items: center; gap: 5px;
+        }
+        .roi-toolbar .btn-roi:hover { border-color: var(--accent); color: #fff; }
+        .roi-toolbar .btn-roi.active { background: rgba(0,255,157,0.15); border-color: var(--accent); color: var(--accent); }
+        .roi-toolbar .roi-hint { color: #666; font-size: 11px; }
+        .roi-toolbar .roi-count { color: var(--accent); font-family: 'Consolas', monospace; }
+        /* 画框模式 */
+        .video-container.drawing-mode { cursor: crosshair !important; }
+        .video-container.drawing-mode * { pointer-events: none !important; }
+        .roi-draw-preview {
+            position: absolute; border: 2px dashed #f5e642;
+            background: rgba(245,230,66,0.08); z-index: 20;
+            pointer-events: none; display: none;
+        }
+        /* 已确认的 ROI 区域(持久) — 放在 yolo-boxes 之外 */
+        .roi-persistent {
+            position: absolute; z-index: 4; pointer-events: none;
+        }
+        .roi-persistent .roi-border {
+            width: 100%; height: 100%; border: 2.5px solid #f5e642; box-sizing: border-box;
+        }
+        .roi-persistent .roi-label {
+            position: absolute; top: -1px; left: -1px;
+            padding: 2px 8px; background: rgba(245,230,66,0.85); color: #000;
+            font-family: 'Consolas', monospace; font-size: 11px; font-weight: bold;
+            white-space: nowrap; line-height: 16px;
+        }
+        .roi-persistent .roi-delete {
+            position: absolute; top: -1px; right: -1px;
+            width: 18px; height: 18px; background: rgba(255,77,79,0.9);
+            color: #fff; border: none; cursor: pointer; font-size: 12px;
+            line-height: 18px; text-align: center; pointer-events: auto;
+            border-radius: 0 0 0 4px;
+        }
+        .roi-persistent .roi-delete:hover { background: #ff4d4f; }
+        /* AI 统计叠加层 */
+        .ai-stats {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.75); padding: 10px 14px; border-radius: 6px;
+            font-family: 'Consolas', monospace; font-size: 11px; color: #0f0;
+            border: 1px solid #444; z-index: 10; line-height: 1.7;
+            backdrop-filter: blur(4px);
+        }
+        .ai-stats .label { color: #999; }
+        /* 检测计数叠加 */
+        .detection-summary {
+            position: absolute; bottom: 10px; left: 10px;
+            background: rgba(0,0,0,0.75); padding: 8px 14px; border-radius: 6px;
+            font-size: 12px; z-index: 10; display: flex; gap: 15px;
+            backdrop-filter: blur(4px); border: 1px solid #444;
+        }
+        .det-item { display: flex; align-items: center; gap: 6px; }
+        .det-dot { width: 10px; height: 10px; border-radius: 2px; }
+        .det-dot.v { background: #00e640; }
+        .det-dot.p { background: #ef4444; }
+        .det-dot.b { background: #3b82f6; }
+
+        /* 右侧面板滚动 */
+        .monitor-side { overflow-y: auto; padding-right: 4px; }
+        .monitor-side::-webkit-scrollbar { width: 4px; }
+        .monitor-side::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+        /* 鸿蒙拓扑动画 */
+        .topology-box {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #0f1623; padding: 12px; border-radius: 6px;
+            margin-top: 12px; border: 1px solid #333;
+        }
+        .node { text-align: center; z-index: 2; }
+        .node i { font-size: 18px; margin-bottom: 4px; display: block; }
+        .node span { font-size: 10px; color: #aaa; }
+        .link {
+            flex: 1; height: 2px; background: #333; margin: 0 12px;
+            position: relative; overflow: hidden;
+        }
+        .link::after {
+            content: ''; position: absolute; top: 0; left: 0; width: 50%; height: 100%;
+            background: linear-gradient(90deg, transparent, var(--harmony-orange), transparent);
+            animation: flow 1.5s infinite linear;
+        }
+        @keyframes flow { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+
+        /* 信号灯栏 - 四方向 + 倒计时圆环 */
+        .signal-bar {
+            grid-column: 1 / -1; display: flex; justify-content: space-around; align-items: center;
+            background: var(--bg-panel); padding: 18px 20px; border-radius: 8px;
+            border: 1px solid #333; margin-top: 15px; gap: 10px;
+        }
+        .traffic-light-group { text-align: center; display: flex; flex-direction: column; align-items: center; }
+        .traffic-light-group .tl-label { font-size: 11px; color: #888; margin-bottom: 6px; letter-spacing: 0.5px; }
+        /* 竖排信号灯 */
+        .traffic-light-vertical {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 5px; background: #000; padding: 8px 7px;
+            border-radius: 20px; border: 2px solid #333;
+            box-shadow: inset 0 0 10px #000;
+        }
+        .light-v {
+            width: 22px; height: 22px; border-radius: 50%;
+            background: #222; transition: 0.3s;
+        }
+        .light-v.red.on { background: var(--danger); box-shadow: 0 0 15px var(--danger); }
+        .light-v.yellow.on { background: var(--warning); box-shadow: 0 0 15px var(--warning); }
+        .light-v.green.on { background: var(--success); box-shadow: 0 0 15px var(--success); }
+        /* 圆环倒计时 */
+        .countdown-ring {
+            position: relative; width: 64px; height: 64px; margin-top: 6px;
+        }
+        .countdown-ring svg { position: absolute; top: 0; left: 0; }
+        .countdown-number {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 22px; font-weight: bold;
+            font-family: 'Consolas', monospace;
+        }
+        /* 旧的横排灯保留兼容 */
+        .traffic-light {
+            display: flex; gap: 8px; background: #000; padding: 8px;
+            border-radius: 20px; border: 2px solid #333;
+            box-shadow: inset 0 0 10px #000;
+        }
+        .light { width: 24px; height: 24px; border-radius: 50%; background: #222; transition: 0.3s; }
+        .light.red.on { background: var(--danger); box-shadow: 0 0 15px var(--danger); }
+        .light.yellow.on { background: var(--warning); box-shadow: 0 0 15px var(--warning); }
+        .light.green.on { background: var(--success); box-shadow: 0 0 15px var(--success); }
+        .tl-countdown {
+            font-size: 18px; font-weight: bold; margin-top: 6px;
+            font-family: 'Consolas', monospace; letter-spacing: 1px;
+        }
+        .tl-countdown.red { color: var(--danger); }
+        .tl-countdown.yellow { color: var(--warning); }
+        .tl-countdown.green { color: var(--success); }
+        /* FSM 状态指示 */
+        .fsm-indicator {
+            display: flex; align-items: center; gap: 10px;
+            font-size: 12px; color: #aaa;
+        }
+        .fsm-state {
+            padding: 3px 10px; border-radius: 4px; font-weight: bold; font-size: 11px;
+        }
+        .fsm-state.RED { background: rgba(255,77,79,0.2); color: var(--danger); border: 1px solid var(--danger); }
+        .fsm-state.GREEN { background: rgba(82,196,26,0.2); color: var(--success); border: 1px solid var(--success); }
+        .fsm-state.YELLOW { background: rgba(250,173,20,0.2); color: var(--warning); border: 1px solid var(--warning); }
+        .fsm-reason { font-size: 10px; color: #666; }
+
+        /* 压力算法可视化 */
+        .pressure-control-box { margin-top: 0; }
+        .pressure-visual {
+            display: flex; align-items: center; gap: 12px; margin: 10px 0;
+        }
+        .pressure-gauge {
+            width: 100%; height: 12px; background: #1a2639; border-radius: 6px;
+            overflow: hidden; position: relative;
+        }
+        .pressure-fill {
+            height: 100%; border-radius: 6px; transition: width 0.8s, background 0.5s;
+            position: relative;
+        }
+        .pressure-fill.low { background: linear-gradient(90deg, #10b981, #34d399); }
+        .pressure-fill.mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .pressure-fill.high { background: linear-gradient(90deg, #ef4444, #f87171); }
+        .pressure-value-display {
+            font-size: 22px; font-weight: bold; font-family: 'Consolas', monospace;
+            min-width: 55px; text-align: right;
+        }
+        .pressure-detail {
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;
+        }
+        .pressure-detail-item {
+            background: #0f1623; padding: 6px 8px; border-radius: 4px;
+            font-size: 11px; text-align: center;
+        }
+        .pressure-detail-item .pd-label { color: #666; margin-bottom: 2px; }
+        .pressure-detail-item .pd-value { font-weight: bold; font-family: 'Consolas', monospace; }
+
+        /* 2. 信号控制面板 */
+        .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .slider-group { margin-bottom: 20px; }
+        .slider-group label { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+        input[type="range"] { 
+            width: 100%; height: 6px; background: #333; border-radius: 3px; 
+            appearance: none; outline: none; 
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none; width: 16px; height: 16px; background: var(--primary);
+            border-radius: 50%; cursor: pointer;
+        }
+        .log-console {
+            background: #000; height: 250px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 11px; color: var(--accent);
+            padding: 15px; border: 1px solid #333; border-radius: 4px;
+        }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .toggle-switch {
+            display: inline-block; width: 50px; height: 26px;
+            background: #333; border-radius: 13px; position: relative;
+            cursor: pointer; transition: 0.3s; vertical-align: middle;
+        }
+        .toggle-switch::after {
+            content: ''; position: absolute; top: 3px; left: 3px;
+            width: 20px; height: 20px; background: white;
+            border-radius: 50%; transition: 0.3s;
+        }
+        .toggle-switch.active { background: var(--success); }
+        .toggle-switch.active::after { left: 27px; }
+
+        /* 紧急预案按钮 */
+        .emergency-btn {
+            background: var(--danger); color: white; border: none;
+            padding: 12px 20px; border-radius: 4px; cursor: pointer;
+            font-weight: bold; animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(255, 77, 79, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); } }
+
+        /* 3. 数据看板 */
+        .dashboard-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 25px;
+        }
+        .chart-container { position: relative; height: 320px; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .data-table th, .data-table td {
+            text-align: left; padding: 12px; border-bottom: 1px solid #333;
+        }
+        .data-table th { color: var(--text-sub); font-weight: 500; }
+        .data-table tr:hover { background: rgba(255,255,255,0.02); }
+
+        /* 仿真对比卡片 */
+        .comparison-card {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+            background: linear-gradient(135deg, rgba(255,77,79,0.1) 0%, rgba(82,196,26,0.1) 100%);
+            border: 1px solid #333; border-radius: 8px; padding: 20px;
+        }
+        .comparison-item {
+            text-align: center; padding: 15px;
+            background: rgba(0,0,0,0.3); border-radius: 8px;
+        }
+        .comparison-item h4 { font-size: 12px; color: #aaa; margin-bottom: 10px; }
+        .comparison-item .value { font-size: 24px; font-weight: bold; }
+        .comparison-item.baseline .value { color: var(--danger); }
+        .comparison-item.optimized .value { color: var(--success); }
+        .comparison-item .improvement {
+            font-size: 11px; color: var(--success); margin-top: 5px;
+        }
+
+        /* 4. SUMO 仿真 */
+        .sumo-view {
+            display: grid; grid-template-columns: 2fr 1fr; gap: 25px; height: calc(100vh - 150px);
+        }
+        .map-view {
+            background: #1a2639; position: relative;
+            border-radius: 8px; overflow: hidden;
+            perspective: 1000px;
+            border: 1px solid #333;
+        }
+        .map-plane {
+            width: 100%; height: 100%;
+            transform: rotateX(20deg);
+            transform-style: preserve-3d;
+            position: relative;
+        }
+        .road {
+            position: absolute; background: #2d3748;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .road-h { top: 50%; left: 0; width: 100%; height: 60px; transform: translateY(-50%); }
+        .road-v { top: 0; left: 50%; width: 60px; height: 100%; transform: translateX(-50%); }
+        
+        /* 5 环放射状路网 SVG */
+        .sumo-network {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0.3; pointer-events: none;
+        }
+        
+        .car {
+            position: absolute; width: 24px; height: 12px;
+            background: var(--accent); border-radius: 2px;
+            box-shadow: 0 0 10px var(--accent);
+            transition: all 0.5s linear;
+            z-index: 10;
+        }
+        .car.vertical { transform: rotate(90deg); }
+        .sim-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .btn {
+            padding: 8px 16px; background: var(--primary);
+            border: none; color: white; border-radius: 4px; cursor: pointer;
+            font-size: 12px; transition: 0.2s;
+        }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn.secondary { background: #333; }
+        .btn.danger { background: var(--danger); }
+        .btn.export { background: var(--success); }
+
+        /* 5. 场景演示 */
+        .scenario-cards {
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;
+        }
+        .scenario-card {
+            background: var(--bg-panel); padding: 20px;
+            border: 1px solid #333; border-radius: 8px;
+            text-align: center; cursor: pointer;
+            transition: 0.3s; position: relative; overflow: hidden;
+        }
+        .scenario-card:hover { transform: translateY(-5px); border-color: var(--primary); }
+        .scenario-card.active {
+            border-color: var(--accent); background: rgba(0, 255, 157, 0.05);
+            box-shadow: 0 0 15px rgba(0, 255, 157, 0.1);
+        }
+        .scenario-card i { font-size: 28px; margin-bottom: 15px; color: var(--text-sub); }
+        .scenario-card.active i { color: var(--accent); }
+        
+        .progress-bar {
+            width: 100%; height: 6px; background: #333;
+            border-radius: 3px; margin: 25px 0; overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%; background: var(--accent);
+            width: 0%; transition: width 0.5s;
+            box-shadow: 0 0 10px var(--accent);
+        }
+        .commentary-box {
+            background: #000; padding: 20px; border-radius: 8px;
+            min-height: 120px; border: 1px solid #333;
+            font-family: 'Consolas', monospace; font-size: 13px;
+            line-height: 1.6;
+        }
+        .highlight { color: var(--accent); font-weight: bold; }
+
+        /* 6. 设备拓扑管理 */
+        .device-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+        }
+        .device-card {
+            background: var(--bg-panel); border-radius: 8px;
+            padding: 20px; border: 1px solid #333;
+            position: relative;
+        }
+        .device-card::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 100%; height: 3px;
+            background: var(--primary);
+        }
+        .device-card.iot::before { background: var(--success); }
+        .device-card.camera::before { background: var(--warning); }
+        .device-header {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 15px; padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .device-icon {
+            width: 40px; height: 40px; border-radius: 8px;
+            background: rgba(0, 120, 212, 0.2);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--primary);
+        }
+        .device-card.iot .device-icon { background: rgba(82, 196, 26, 0.2); color: var(--success); }
+        .device-card.camera .device-icon { background: rgba(250, 173, 20, 0.2); color: var(--warning); }
+        .device-info { flex: 1; }
+        .device-name { font-weight: bold; font-size: 14px; }
+        .device-id { font-size: 11px; color: #666; }
+        .device-status {
+            display: inline-block; padding: 2px 8px;
+            border-radius: 3px; font-size: 10px;
+            background: rgba(82, 196, 26, 0.2);
+            color: var(--success);
+        }
+        .device-metrics {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 10px; margin-bottom: 15px;
+        }
+        .metric {
+            background: #0f1623; padding: 8px;
+            border-radius: 4px; font-size: 11px;
+        }
+        .metric-label { color: #666; margin-bottom: 3px; }
+        .metric-value { color: var(--text-main); font-weight: bold; }
+        .device-actions {
+            display: flex; gap: 8px;
+        }
+        .device-actions button {
+            flex: 1; padding: 6px; font-size: 10px;
+        }
+
+        /* 系统健康监控 */
+        .health-card {
+            border-left: 4px solid var(--success);
+        }
+        .health-card.warning { border-left-color: var(--warning); }
+        .health-card.danger { border-left-color: var(--danger); }
+        .health-score {
+            font-size: 32px; font-weight: bold;
+            background: linear-gradient(135deg, var(--success), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .health-score.warning {
+            background: linear-gradient(135deg, var(--warning), var(--danger));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* 7. 算法参数配置 */
+        .config-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 25px;
+        }
+        .config-section {
+            background: var(--bg-panel); border-radius: 8px;
+            padding: 20px; border: 1px solid #333;
+        }
+        .config-header {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 20px; padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .config-header i { color: var(--primary); }
+        .config-item {
+            margin-bottom: 20px;
+        }
+        .config-item label {
+            display: flex; justify-content: space-between;
+            margin-bottom: 8px; font-size: 13px;
+        }
+        .config-item input[type="range"] {
+            width: 100%; height: 6px; background: #333;
+            border-radius: 3px; appearance: none; outline: none;
+        }
+        .config-item input[type="range"]::-webkit-slider-thumb {
+            appearance: none; width: 16px; height: 16px;
+            background: var(--primary); border-radius: 50%;
+            cursor: pointer;
+        }
+        .config-item input[type="number"] {
+            width: 100%; padding: 8px; background: #0f1623;
+            border: 1px solid #333; color: white;
+            border-radius: 4px;
+        }
+        .config-save {
+            width: 100%; padding: 12px; background: var(--success);
+            border: none; color: white; border-radius: 4px;
+            cursor: pointer; font-weight: bold; margin-top: 10px;
+        }
+
+        /* 8. V2X 车路协同 */
+        .v2x-grid {
+            display: grid; grid-template-columns: 2fr 1fr; gap: 25px;
+        }
+        .v2x-map {
+            background: #1a2639; border-radius: 8px;
+            height: 400px; position: relative;
+            border: 1px solid #333; overflow: hidden;
+        }
+        .v2x-road {
+            position: absolute; background: #2d3748;
+        }
+        .v2x-road-h { top: 50%; left: 0; width: 100%; height: 50px; transform: translateY(-50%); }
+        .v2x-road-v { top: 0; left: 50%; width: 50px; height: 100%; transform: translateX(-50%); }
+        .v2x-vehicle {
+            position: absolute; width: 30px; height: 15px;
+            background: var(--v2x-blue); border-radius: 3px;
+            box-shadow: 0 0 15px var(--v2x-blue);
+            transition: all 0.5s linear;
+        }
+        .v2x-vehicle.emergency {
+            background: var(--danger); box-shadow: 0 0 20px var(--danger);
+            animation: emergency-pulse 1s infinite;
+        }
+        @keyframes emergency-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .v2x-message-log {
+            background: #000; height: 300px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            padding: 15px; border: 1px solid #333; border-radius: 4px;
+        }
+        .v2x-msg {
+            margin-bottom: 8px; padding: 8px;
+            background: rgba(0, 212, 255, 0.1);
+            border-left: 3px solid var(--v2x-blue);
+            border-radius: 0 4px 4px 0;
+        }
+        .v2x-msg.emergency {
+            background: rgba(255, 77, 79, 0.1);
+            border-left-color: var(--danger);
+        }
+        .v2x-stats {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 15px; margin-bottom: 20px;
+        }
+        .v2x-stat-card {
+            background: var(--bg-panel); padding: 15px;
+            border-radius: 8px; border: 1px solid #333;
+            text-align: center;
+        }
+        .v2x-stat-value {
+            font-size: 24px; font-weight: bold;
+            color: var(--v2x-blue);
+        }
+        .v2x-stat-label {
+            font-size: 11px; color: #666; margin-top: 5px;
+        }
+
+        /* 底部状态栏 */
+        .footer-status {
+            position: fixed; bottom: 0; left: 260px; right: 0;
+            height: 30px; background: #0f1623; border-top: 1px solid #333;
+            display: flex; align-items: center; padding: 0 20px;
+            font-size: 11px; color: #666; justify-content: space-between;
+        }
+        .protocol-badge {
+            display: flex; align-items: center; gap: 5px;
+            padding: 2px 6px; background: #1a2639; border-radius: 3px;
+            margin-left: 10px;
+        }
+        .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+        /* === 三段式决策链路 === */
+        .decision-pipeline {
+            display: flex; align-items: stretch; gap: 0; margin: 12px 0;
+        }
+        .pipeline-step {
+            flex: 1; background: #0f1623; border-radius: 8px; padding: 10px;
+            border: 1px solid #333; transition: border-color 0.3s;
+        }
+        .pipeline-step.active-step {
+            border-color: var(--accent); box-shadow: 0 0 10px rgba(0,255,157,0.1);
+        }
+        .step-header {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 11px; color: #888; margin-bottom: 8px;
+            padding-bottom: 6px; border-bottom: 1px solid #222;
+        }
+        .step-body { font-size: 12px; }
+        .step-metric {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 4px 0;
+        }
+        .step-label { color: #666; font-size: 11px; }
+        .step-value {
+            font-weight: bold; font-family: 'Consolas', monospace; font-size: 13px;
+        }
+        .pipeline-arrow {
+            display: flex; align-items: center; padding: 0 5px;
+            color: #444; font-size: 14px;
+            animation: arrowPulse 1.5s infinite;
+        }
+        @keyframes arrowPulse {
+            0%, 100% { opacity: 0.3; } 50% { opacity: 1; color: var(--accent); }
+        }
+        .pressure-formula {
+            text-align: center; font-family: 'Consolas', monospace;
+            font-size: 13px; color: var(--text-sub); padding: 5px 0;
+            background: #0b1120; border-radius: 4px; margin-bottom: 6px;
+        }
+        .pressure-dial { position: relative; text-align: center; }
+        .dial-value {
+            font-size: 20px; font-weight: bold; font-family: 'Consolas', monospace;
+            margin-top: -5px;
+        }
+        .pressure-zones {
+            display: flex; justify-content: space-between;
+            font-size: 9px; padding: 0 10px; margin-top: 2px;
+        }
+        .decision-result {
+            font-size: 15px !important; padding: 2px 8px;
+            background: rgba(0,255,157,0.1); border-radius: 4px;
+        }
+
+        /* === SUMO 仿真增强 === */
+        .sumo-legend {
+            position: absolute; bottom: 10px; left: 10px;
+            background: rgba(0,0,0,0.75); padding: 8px 12px;
+            border-radius: 6px; font-size: 10px;
+            display: flex; gap: 12px; z-index: 10;
+            backdrop-filter: blur(4px); border: 1px solid #444;
+        }
+        .legend-dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 2px; margin-right: 4px; vertical-align: middle;
+        }
+        .sumo-time {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.75); padding: 6px 12px;
+            border-radius: 4px; font-size: 12px; color: #aaa;
+            font-family: 'Consolas', monospace;
+            backdrop-filter: blur(4px); border: 1px solid #444;
+        }
+        .sumo-title-overlay {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.75); padding: 6px 12px;
+            border-radius: 4px; font-size: 11px; color: var(--accent);
+            font-family: 'Consolas', monospace;
+            backdrop-filter: blur(4px); border: 1px solid #444;
+        }
+        #sumo-svg .tl-node { transition: fill 0.3s; }
+
+        /* 响应式 */
+        @media (max-width: 1400px) {
+            .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+            .device-grid { grid-template-columns: repeat(2, 1fr); }
+            .scenario-cards { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 1200px) {
+            .monitor-grid { grid-template-columns: 1fr; }
+            .control-grid { grid-template-columns: 1fr; }
+            .config-grid { grid-template-columns: 1fr; }
+            .v2x-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 登录界面 -->
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2 style="margin-bottom: 10px; color: var(--text-main);">HarmonyOS Smart Traffic</h2>
+            <p style="color: #666; margin-bottom: 30px; font-size: 13px;">基于鸿蒙分布式软总线的智慧红绿灯系统</p>
+            <input type="text" placeholder="Username" value="admin">
+            <input type="password" placeholder="Password" value="123456">
+            <select>
+                <option>Admin (RK3568 Gateway)</option>
+                <option>Operator (Hi3861 Node)</option>
+                <option>Viewer</option>
+            </select>
+            <button onclick="login()">Login System</button>
+            <div class="login-status" id="login-status">
+                <i class="fas fa-circle-notch fa-spin"></i> Connecting to Distributed SoftBus...
+            </div>
+            <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px; opacity: 0.5;">
+                <i class="fas fa-microchip" title="RK3568"></i>
+                <i class="fas fa-wifi" title="Hi3861"></i>
+                <i class="fas fa-network-wired" title="SoftBus"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <div class="logo">
+            <i class="fas fa-infinity"></i> Harmony Traffic
+        </div>
+        <div class="nav-items">
+            <div class="nav-item active" onclick="showPage('monitor', this)">
+                <i class="fas fa-video"></i> 监控主界面
+            </div>
+            <div class="nav-item" onclick="showPage('control', this)">
+                <i class="fas fa-sliders-h"></i> 信号控制面板
+            </div>
+            <div class="nav-item" onclick="showPage('dashboard', this)">
+                <i class="fas fa-chart-line"></i> 数据看板
+            </div>
+            <div class="nav-item" onclick="showPage('sumo', this)">
+                <i class="fas fa-road"></i> SUMO 仿真
+            </div>
+            <div class="nav-item" onclick="showPage('scenario', this)">
+                <i class="fas fa-play-circle"></i> 场景演示
+            </div>
+            <div class="nav-item" onclick="showPage('devices', this)">
+                <i class="fas fa-server"></i> 设备拓扑管理
+            </div>
+            <div class="nav-item" onclick="showPage('config', this)">
+                <i class="fas fa-cog"></i> 算法参数配置
+            </div>
+            <div class="nav-item" onclick="showPage('v2x', this)">
+                <i class="fas fa-car"></i> V2X 车路协同
+            </div>
+        </div>
+        <div class="system-status">
+            <div class="status-row">
+                <span>Gateway:</span>
+                <span class="status-val">RK3568 (Online)</span>
+            </div>
+            <div class="status-row">
+                <span>Controller:</span>
+                <span class="status-val">Hi3861 (Connected)</span>
+            </div>
+            <div class="status-row">
+                <span>SoftBus:</span>
+                <span class="status-val">Latency 12ms</span>
+            </div>
+            <div class="status-row">
+                <span>Uptime:</span>
+                <span class="status-val">99.97%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+        
+        <!-- 1. 监控主界面 -->
+        <div id="monitor" class="page active">
+            <div class="header">
+                <h2>实时监控主界面 <span class="badge ok">Live</span></h2>
+                <div>
+                    <span class="badge ok">GB/T 28181</span>
+                    <span class="badge ok">GA/T 497</span>
+                </div>
+            </div>
+            <!-- ROI 工具栏 -->
+            <div class="roi-toolbar">
+                <button class="btn-roi" id="btn-draw-roi" onclick="toggleDrawMode()">
+                    <i class="fas fa-vector-square"></i> Draw Zone
+                </button>
+                <button class="btn-roi" onclick="clearAllROIs()">
+                    <i class="fas fa-trash-alt"></i> Clear All
+                </button>
+                <span class="roi-hint">Zones: <span class="roi-count" id="roi-count">0</span></span>
+                <span class="roi-hint" id="draw-hint" style="display:none;">Click &amp; drag on video to draw a detection zone</span>
+            </div>
+            <div class="monitor-grid">
+                <div class="video-container" id="video-container">
+                    <video class="video-feed" id="video-feed" autoplay loop muted playsinline>
+                        <source src="../车流.mp4" type="video/mp4">
+                    </video>
+                    <!-- 板端推理信息 (左上第一行) -->
+                    <div class="board-info-overlay" id="board-info">
+                        Boards: <span id="bi-ms">49</span>ms (<span id="bi-fps">1.00</span> fps) | Vehicles: <span id="bi-veh">0</span>
+                    </div>
+                    <!-- 持久 ROI 区域 (不被 yolo-boxes 重绘清空) -->
+                    <div id="roi-persistent-layer"></div>
+                    <!-- 拖拽预览框 -->
+                    <div class="roi-draw-preview" id="roi-draw-preview"></div>
+                    <!-- YOLO 检测框容器 (每帧重绘) -->
+                    <div id="yolo-boxes"></div>
+                    <!-- AI 统计叠加 (右上) -->
+                    <div class="ai-stats">
+                        <div><span class="label">Model:</span> YOLOv8n (INT8)</div>
+                        <div><span class="label">NPU:</span> <span id="npu-load">45%</span> <span class="label">| 0.8 TOPS</span></div>
+                        <div><span class="label">Infer:</span> <span id="ai-infer-ms">32</span>ms (<span id="ai-fps">31</span> FPS)</div>
+                        <div><span class="label">Mem:</span> <span id="ai-mem">128</span> MB</div>
+                    </div>
+                    <!-- 检测计数 (左下) -->
+                    <div class="detection-summary">
+                        <div class="det-item"><div class="det-dot v"></div> Car <strong id="det-car">0</strong></div>
+                        <div class="det-item"><div class="det-dot b"></div> Bus <strong id="det-bus">0</strong></div>
+                        <div class="det-item"><div class="det-dot p"></div> Person <strong id="det-person">0</strong></div>
+                    </div>
+                </div>
+                <div class="monitor-side">
+                    <!-- 实时交通数据 -->
+                    <div class="card">
+                        <div class="card-title">实时交通数据</div>
+                        <div style="margin-bottom: 12px;">
+                            <div style="color: var(--text-sub); font-size: 12px;">Vehicles Detected</div>
+                            <div class="card-value" style="color: var(--accent);"><span id="live-flow">0</span></div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <div style="color: var(--text-sub); font-size: 12px;">Queue Length</div>
+                            <div class="card-value"><span id="live-queue">0</span> <span style="font-size:14px;">m</span></div>
+                        </div>
+                        <div>
+                            <div style="color: var(--text-sub); font-size: 12px;">Avg. Waiting Time</div>
+                            <div class="card-value" style="color: var(--warning);"><span id="live-wait">0</span> <span style="font-size:14px;">s</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 压力算法：三段式决策链路 -->
+                    <div class="card pressure-control-box">
+                        <div class="card-title">Max Pressure Control
+                            <span class="fsm-state RED" id="fsm-badge">RED</span>
+                        </div>
+                        <div class="decision-pipeline">
+                            <!-- Step 1: 检测输入 -->
+                            <div class="pipeline-step" id="pl-step-detect">
+                                <div class="step-header">
+                                    <i class="fas fa-camera" style="color: var(--warning);"></i>
+                                    <span>1. 检测输入</span>
+                                </div>
+                                <div class="step-body">
+                                    <div class="step-metric">
+                                        <span class="step-label">NS 排队</span>
+                                        <span class="step-value" id="pl-ns-queue" style="color: var(--danger);">0 veh</span>
+                                    </div>
+                                    <div class="step-metric">
+                                        <span class="step-label">EW 排队</span>
+                                        <span class="step-value" id="pl-ew-queue" style="color: var(--success);">0 veh</span>
+                                    </div>
+                                    <div class="step-metric">
+                                        <span class="step-label">行人</span>
+                                        <span class="step-value" id="pl-ped-count" style="color: var(--primary);">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 箭头 -->
+                            <div class="pipeline-arrow"><i class="fas fa-chevron-right"></i></div>
+                            <!-- Step 2: 压力计算 -->
+                            <div class="pipeline-step" id="pl-step-calc">
+                                <div class="step-header">
+                                    <i class="fas fa-calculator" style="color: var(--primary);"></i>
+                                    <span>2. 压力计算</span>
+                                </div>
+                                <div class="step-body">
+                                    <div class="pressure-formula">
+                                        P = <span id="pl-entry-val">0</span> &minus; <span id="pl-exit-val">0</span>
+                                    </div>
+                                    <div class="pressure-dial">
+                                        <svg viewBox="0 0 100 60" width="100%" height="50">
+                                            <path d="M15 52 A 38 38 0 0 1 85 52" fill="none" stroke="#1a2639" stroke-width="7" stroke-linecap="round"/>
+                                            <path d="M15 52 A 38 38 0 0 1 85 52" fill="none" stroke-width="7" stroke-linecap="round"
+                                                  id="pressure-arc" stroke-dasharray="119.4" stroke-dashoffset="80"
+                                                  style="transition: stroke-dashoffset 0.5s, stroke 0.3s;"/>
+                                            <line x1="50" y1="52" x2="50" y2="20" stroke="white" stroke-width="2"
+                                                  id="pressure-needle" transform="rotate(-60 50 52)"
+                                                  style="transition: transform 0.5s;"/>
+                                            <circle cx="50" cy="52" r="3" fill="white"/>
+                                        </svg>
+                                        <div class="dial-value" id="pressure-value-display" style="color: var(--success);">0.30</div>
+                                    </div>
+                                    <div class="pressure-zones">
+                                        <span style="color: var(--success);">Low</span>
+                                        <span style="color: var(--warning);">Mid</span>
+                                        <span style="color: var(--danger);">High</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 箭头 -->
+                            <div class="pipeline-arrow"><i class="fas fa-chevron-right"></i></div>
+                            <!-- Step 3: 配时决策 -->
+                            <div class="pipeline-step" id="pl-step-decision">
+                                <div class="step-header">
+                                    <i class="fas fa-traffic-light" style="color: var(--accent);"></i>
+                                    <span>3. 配时决策</span>
+                                </div>
+                                <div class="step-body">
+                                    <div class="step-metric">
+                                        <span class="step-label">决策</span>
+                                        <span class="step-value decision-result" id="pd-decision">HOLD</span>
+                                    </div>
+                                    <div class="step-metric">
+                                        <span class="step-label">绿灯时长</span>
+                                        <span class="step-value" id="pd-next-green" style="color: var(--accent);">--</span>
+                                    </div>
+                                    <div class="step-metric">
+                                        <span class="step-label">优先方向</span>
+                                        <span class="step-value" id="pd-priority-dir" style="color: var(--primary);">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="fsm-reason" id="fsm-reason" style="margin-top: 8px; font-size: 11px; color: #666;">Waiting for detection...</div>
+                    </div>
+
+                    <!-- 拓扑 -->
+                    <div class="topology-box">
+                        <div class="node">
+                            <i class="fas fa-microchip" style="color: var(--primary);"></i>
+                            <span>RK3568</span>
+                        </div>
+                        <div class="link"></div>
+                        <div class="node">
+                            <i class="fas fa-wifi" style="color: var(--success);"></i>
+                            <span>Hi3861</span>
+                        </div>
+                        <div class="link"></div>
+                        <div class="node">
+                            <i class="fas fa-traffic-light" style="color: var(--warning);"></i>
+                            <span>GPIO</span>
+                        </div>
+                    </div>
+                    <div style="text-align: center; font-size: 10px; color: #555; margin-top: 4px;">
+                        Distributed SoftBus <span style="color: var(--success);">Connected</span> | Latency 12ms
+                    </div>
+                </div>
+                <!-- 信号灯栏：四方向竖排灯 + 圆环倒计时 + FSM 状态 -->
+                <div class="signal-bar">
+                    <!-- 南北方向 -->
+                    <div class="traffic-light-group">
+                        <div class="tl-label">NS (主干道)</div>
+                        <div class="traffic-light-vertical" id="tl-ns">
+                            <div class="light-v red on"></div>
+                            <div class="light-v yellow"></div>
+                            <div class="light-v green"></div>
+                        </div>
+                        <div class="countdown-ring">
+                            <svg viewBox="0 0 64 64" width="64" height="64">
+                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
+                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
+                                        stroke-linecap="round" id="cd-arc-ns" class="cd-arc"
+                                        stroke-dasharray="169.6" stroke-dashoffset="0"
+                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
+                            </svg>
+                            <div class="countdown-number" id="cd-ns">--</div>
+                        </div>
+                    </div>
+
+                    <!-- FSM 状态中心区 -->
+                    <div class="fsm-indicator" style="flex-direction: column; gap: 8px; min-width: 140px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 10px; color: #666; margin-bottom: 3px;">FSM State</div>
+                            <div id="fsm-state-text" style="font-size: 16px; font-weight: bold; color: var(--danger); letter-spacing: 1px;">RED</div>
+                        </div>
+                        <div style="display: flex; gap: 12px; justify-content: center;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 10px; color: #666;">Green Dur</div>
+                                <div id="fsm-green-dur" style="font-size: 14px; font-weight: bold; color: var(--accent);">--</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 10px; color: #666;">Vehicles</div>
+                                <div id="fsm-veh-count" style="font-size: 14px; font-weight: bold; color: var(--text-main);">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 东西方向 -->
+                    <div class="traffic-light-group">
+                        <div class="tl-label">EW (支路)</div>
+                        <div class="traffic-light-vertical" id="tl-ew">
+                            <div class="light-v red"></div>
+                            <div class="light-v yellow"></div>
+                            <div class="light-v green on"></div>
+                        </div>
+                        <div class="countdown-ring">
+                            <svg viewBox="0 0 64 64" width="64" height="64">
+                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
+                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
+                                        stroke-linecap="round" id="cd-arc-ew" class="cd-arc"
+                                        stroke-dasharray="169.6" stroke-dashoffset="0"
+                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
+                            </svg>
+                            <div class="countdown-number" id="cd-ew">--</div>
+                        </div>
+                    </div>
+
+                    <!-- 行人信号 -->
+                    <div class="traffic-light-group">
+                        <div class="tl-label">Pedestrian</div>
+                        <div class="traffic-light-vertical" id="tl-ped">
+                            <div class="light-v red"></div>
+                            <div class="light-v yellow" style="visibility:hidden;"></div>
+                            <div class="light-v green on"></div>
+                        </div>
+                        <div class="countdown-ring">
+                            <svg viewBox="0 0 64 64" width="64" height="64">
+                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
+                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
+                                        stroke-linecap="round" id="cd-arc-ped" class="cd-arc"
+                                        stroke-dasharray="169.6" stroke-dashoffset="0"
+                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
+                            </svg>
+                            <div class="countdown-number" id="cd-ped">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 信号控制面板 -->
+        <div id="control" class="page">
+            <div class="header">
+                <h2>信号控制面板</h2>
+                <div>
+                    <span style="margin-right: 10px; font-size: 13px;">Control Mode:</span>
+                    <div class="toggle-switch active" onclick="toggleMode(this)" id="mode-switch"></div>
+                    <span id="mode-text" style="color: var(--success); font-size: 13px; margin-left: 5px;">Auto (AI)</span>
+                    <button class="emergency-btn" style="margin-left: 15px;" onclick="emergencyPlan()">
+                        <i class="fas fa-exclamation-triangle"></i> 紧急预案
+                    </button>
+                </div>
+            </div>
+            <div class="control-grid">
+                <div class="card">
+                    <div class="card-title">相位时长调节 (秒)</div>
+                    <div class="slider-group">
+                        <label><span>Left Turn</span> <span id="val-left" style="color: var(--primary);">25s</span></label>
+                        <input type="range" min="10" max="60" value="25" oninput="updateSlider('val-left', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label><span>Straight</span> <span id="val-straight" style="color: var(--primary);">60s</span></label>
+                        <input type="range" min="10" max="90" value="60" oninput="updateSlider('val-straight', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label><span>Right Turn</span> <span id="val-right" style="color: var(--primary);">20s</span></label>
+                        <input type="range" min="10" max="40" value="20" oninput="updateSlider('val-right', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label><span>Pedestrian</span> <span id="val-ped" style="color: var(--primary);">15s</span></label>
+                        <input type="range" min="10" max="30" value="15" oninput="updateSlider('val-ped', this.value)">
+                    </div>
+                    <div style="margin-top: 20px; padding: 15px; background: #0b1120; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 12px; color: #aaa;">Cycle Length</div>
+                            <div style="font-size: 20px; color: var(--primary);">120s</div>
+                        </div>
+                        <i class="fas fa-sync fa-spin" style="color: #666;"></i>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">系统日志 (Real-time Log)</div>
+                    <div class="log-console" id="system-log">
+                        <div class="log-entry">[09:23:17] Mode switched to Manual</div>
+                        <div class="log-entry">[09:24:02] Phase 2 duration adjusted to 60s</div>
+                        <div class="log-entry">[09:25:41] All Red activated</div>
+                        <div class="log-entry">[09:26:00] Hi3861 Controller Synced via SoftBus</div>
+                        <div class="log-entry">[09:26:15] SIP REGISTER 200 OK - Camera CAM-02</div>
+                        <div class="log-entry">[09:26:30] RTP Packet Received - H.264 Stream</div>
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button class="btn danger">All Red</button>
+                        <button class="btn secondary">Manual Release</button>
+                        <button class="btn" style="background: var(--success);">Auto Resume</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 数据看板 -->
+        <div id="dashboard" class="page">
+            <div class="header">
+                <h2>交通数据分析看板</h2>
+                <div>
+                    <button class="btn export" onclick="exportReport()"><i class="fas fa-file-export"></i> 导出报表</button>
+                    <button class="btn" onclick="initCharts()"><i class="fas fa-sync"></i> 刷新</button>
+                </div>
+            </div>
+            
+            <!-- 仿真对比数据显性化 -->
+            <div class="comparison-card" style="margin-bottom: 25px;">
+                <div class="comparison-item baseline">
+                    <h4>Baseline (Fixed Timing)</h4>
+                    <div class="value">721 步</div>
+                    <div style="font-size: 11px; color: #aaa;">Total Steps to Clear</div>
+                </div>
+                <div class="comparison-item optimized">
+                    <h4>Optimized (Max Pressure)</h4>
+                    <div class="value">706 步</div>
+                    <div class="improvement">↓ 2.1% Time Reduction</div>
+                    <div style="font-size: 11px; color: #aaa;">Total Steps to Clear</div>
+                </div>
+            </div>
+            
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-title">Today's Traffic</div>
+                    <div class="card-value" id="dash-traffic">12,458</div>
+                    <div class="card-sub" style="color: var(--success);">↑ 5.2% vs yesterday</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Average Delay</div>
+                    <div class="card-value" id="dash-delay">32.5s</div>
+                    <div class="card-sub" style="color: var(--success);">↓ 41.8% Reduction</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Congestion Index</div>
+                    <div class="card-value" id="dash-congestion">0.68</div>
+                    <div class="card-sub" style="color: var(--warning);">Moderate</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Carbon Emission</div>
+                    <div class="card-value" style="color: var(--success);">-15.2%</div>
+                    <div class="card-sub">Improvement</div>
+                </div>
+            </div>
+            <div class="control-grid" style="grid-template-columns: 2fr 1fr;">
+                <div class="card">
+                    <div class="card-title">24-Hour Traffic Flow Trend</div>
+                    <div class="chart-container">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Smart vs Fixed Signal Performance</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Scenario</th>
+                                <th>Effectiveness</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Incident Detection</td><td style="color: var(--success);">98.5%</td></tr>
+                            <tr><td>Signal Failure</td><td style="color: var(--success);">99.1%</td></tr>
+                            <tr><td>Weather Event</td><td style="color: var(--warning);">85.3%</td></tr>
+                            <tr><td>Special Event</td><td style="color: var(--success);">91.7%</td></tr>
+                            <tr><td>Construction Zone</td><td style="color: var(--success);">94.2%</td></tr>
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 20px; padding: 10px; background: rgba(0, 255, 157, 0.1); border-radius: 4px;">
+                        <div style="font-size: 12px; color: var(--accent);">Travel Time Improvement</div>
+                        <div style="font-size: 18px; font-weight: bold;">+33.8%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. SUMO 仿真 -->
+        <div id="sumo" class="page">
+            <div class="header">
+                <h2>SUMO 交通仿真界面</h2>
+                <div class="sim-controls">
+                    <button class="btn" id="sumo-play-btn" onclick="toggleSim()"><i class="fas fa-play"></i> Start</button>
+                    <button class="btn secondary" onclick="resetSumo()"><i class="fas fa-redo"></i> Reset</button>
+                    <select class="btn secondary" id="sumo-speed-sel" style="background: #333; color: white; border: none;"
+                            onchange="SUMO.speed = parseInt(this.value);">
+                        <option value="1">Speed: 1x</option>
+                        <option value="2">Speed: 2x</option>
+                        <option value="5">Speed: 5x</option>
+                    </select>
+                </div>
+            </div>
+            <div class="sumo-view">
+                <div class="map-view" id="sumo-map" style="position: relative;">
+                    <!-- 5 环放射状路网 SVG -->
+                    <svg id="sumo-svg" viewBox="0 0 600 600" width="100%" height="100%" style="background: #0f1623;">
+                        <defs>
+                            <linearGradient id="roadGrad"><stop offset="0%" stop-color="#2d3748"/><stop offset="100%" stop-color="#3d4f68"/></linearGradient>
+                            <filter id="carGlow"><feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                        </defs>
+                        <!-- 5 环环形路 -->
+                        <g id="sumo-rings">
+                            <circle cx="300" cy="300" r="60"  fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <circle cx="300" cy="300" r="110" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <circle cx="300" cy="300" r="160" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <circle cx="300" cy="300" r="210" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <circle cx="300" cy="300" r="260" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
+                        </g>
+                        <!-- 8 条放射路 (每 45°) -->
+                        <g id="sumo-radials">
+                            <line x1="300" y1="30"  x2="300" y2="570" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <line x1="30"  y1="300" x2="570" y2="300" stroke="url(#roadGrad)" stroke-width="14"/>
+                            <line x1="109" y1="109" x2="491" y2="491" stroke="url(#roadGrad)" stroke-width="12"/>
+                            <line x1="491" y1="109" x2="109" y2="491" stroke="url(#roadGrad)" stroke-width="12"/>
+                        </g>
+                        <!-- 40 个信号灯节点 (JS 生成) -->
+                        <g id="traffic-nodes"></g>
+                        <!-- 车辆容器 -->
+                        <g id="sumo-vehicles" filter="url(#carGlow)"></g>
+                        <!-- 事故标记容器 -->
+                        <g id="sumo-markers"></g>
+                        <!-- 中心标签 -->
+                        <text x="300" y="304" text-anchor="middle" fill="#00ff9d" font-size="9" opacity="0.5" font-family="Consolas">CENTER</text>
+                    </svg>
+                    <!-- 叠加层 -->
+                    <div class="sumo-title-overlay">
+                        <i class="fas fa-road"></i> 5-Ring Spider Network | 40 TLS
+                    </div>
+                    <div class="sumo-time">
+                        <i class="fas fa-clock"></i> Step: <span id="sumo-step">0</span> / 800
+                    </div>
+                    <div class="sumo-legend">
+                        <div><span class="legend-dot" style="background: var(--success);"></span> Green</div>
+                        <div><span class="legend-dot" style="background: var(--danger);"></span> Red</div>
+                        <div><span class="legend-dot" style="background: #00ff9d;"></span> Ring Veh</div>
+                        <div><span class="legend-dot" style="background: #00d4ff;"></span> Radial Veh</div>
+                    </div>
+                </div>
+                <div style="overflow-y: auto;">
+                    <div class="card">
+                        <div class="card-title">仿真状态</div>
+                        <div style="margin-bottom: 10px;">
+                            <div style="font-size: 11px; color: #666;">Status</div>
+                            <div id="sumo-status" style="font-size: 16px; font-weight: bold; color: var(--warning);">Ready</div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                            <div class="metric">
+                                <div class="metric-label">Vehicles</div>
+                                <div class="metric-value" id="sumo-veh-count">50</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Traffic Lights</div>
+                                <div class="metric-value">40</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Avg Speed</div>
+                                <div class="metric-value"><span id="sumo-avg-speed">0.0</span> <span style="font-size:10px;">km/h</span></div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Stopped</div>
+                                <div class="metric-value" id="sumo-stopped" style="color: var(--danger);">0</div>
+                            </div>
+                        </div>
+                        <!-- 进度条 -->
+                        <div style="margin-bottom: 12px;">
+                            <div style="font-size: 10px; color: #555; margin-bottom: 3px;">Progress</div>
+                            <div class="progress-bar" style="margin: 0;">
+                                <div class="progress-fill" id="sumo-progress" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <!-- 场景选择 -->
+                        <div style="margin-bottom: 12px;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Scenario</div>
+                            <select class="btn secondary" id="sumo-scenario-sel"
+                                    style="width: 100%; background: #333; color: white; border: none;"
+                                    onchange="applySumoScenario(this.value);">
+                                <option value="peak">Morning Peak (50 veh)</option>
+                                <option value="accident">Accident (30 veh + block)</option>
+                                <option value="roadwork">Roadwork (40 veh + detour)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <!-- 对比结果 -->
+                    <div class="card">
+                        <div class="card-title">Fixed vs Optimized</div>
+                        <div class="comparison-card" style="padding: 10px; background: none; border: none; gap: 10px;">
+                            <div class="comparison-item baseline" style="padding: 10px;">
+                                <h4 style="font-size: 10px;">Fixed Timing</h4>
+                                <div class="value" style="font-size: 20px;" id="sumo-fixed-time">721 步</div>
+                                <div style="font-size: 10px; color: #aaa;">Total Steps</div>
+                            </div>
+                            <div class="comparison-item optimized" style="padding: 10px;">
+                                <h4 style="font-size: 10px;">Max Pressure</h4>
+                                <div class="value" style="font-size: 20px;" id="sumo-opt-time">706 步</div>
+                                <div class="improvement" id="sumo-improvement">&#8595; 2.1%</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 12px; color: #aaa; line-height: 1.8;">
+                            Travel Time: <span style="color: var(--success);" id="sumo-travel">+33.8%</span><br>
+                            Waiting Time: <span style="color: var(--success);" id="sumo-waiting">-41.8%</span><br>
+                            CO&#8322; Emissions: <span style="color: var(--warning);" id="sumo-co2">245.6 kg</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. 场景演示 -->
+        <div id="scenario" class="page">
+            <div class="header">
+                <h2>场景演示界面</h2>
+                <div>
+                    <button class="btn secondary" onclick="prevScenario()"><i class="fas fa-step-backward"></i></button>
+                    <button class="btn" onclick="nextScenario()">Next Step <i class="fas fa-step-forward"></i></button>
+                </div>
+            </div>
+            <div class="scenario-cards">
+                <div class="scenario-card active" onclick="selectScenario(0)">
+                    <i class="fas fa-sun"></i>
+                    <div>早高峰调度</div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 5px;">7:30-9:00</div>
+                </div>
+                <div class="scenario-card" onclick="selectScenario(1)">
+                    <i class="fas fa-walking"></i>
+                    <div>行人优先</div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 5px;">Detect Pedestrian</div>
+                </div>
+                <div class="scenario-card" onclick="selectScenario(2)">
+                    <i class="fas fa-ambulance"></i>
+                    <div>应急车辆</div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 5px;">Green Wave</div>
+                </div>
+                <div class="scenario-card" onclick="selectScenario(3)">
+                    <i class="fas fa-car-crash"></i>
+                    <div>事故响应</div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 5px;">2min Response</div>
+                </div>
+                <div class="scenario-card" onclick="selectScenario(4)">
+                    <i class="fas fa-hard-hat"></i>
+                    <div>施工管理</div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 5px;">3 Days Plan</div>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 25px;">
+                <div class="card-title">演示进度</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="demo-progress" style="width: 20%;"></div>
+                </div>
+                <div class="commentary-box" id="commentary-text">
+                    <span class="highlight">Step 1:</span> 检测到早高峰流量 → 自动延长直行绿灯至 60 秒。<br>
+                    <span style="color: #666; font-size: 12px;">System is analyzing traffic flow density using RK3568 NPU...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. 设备拓扑管理 -->
+        <div id="devices" class="page">
+            <div class="header">
+                <h2>设备拓扑管理 <span class="badge ok">Distributed SoftBus</span></h2>
+                <button class="btn" onclick="refreshDevices()"><i class="fas fa-sync"></i> 刷新状态</button>
+            </div>
+            
+            <!-- 系统健康监控 -->
+            <div class="card health-card warning" style="margin-bottom: 25px;">
+                <div class="card-title"><i class="fas fa-heartbeat" style="color: var(--warning)"></i> 系统健康诊断</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 12px; color: #aaa;">Health Score</div>
+                        <div class="health-score warning" id="health-score">92/100</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 11px; color: var(--warning);"><i class="fas fa-exclamation-triangle"></i> NPU Temp High (58°C)</div>
+                        <div style="font-size: 11px; color: var(--success);"><i class="fas fa-check-circle"></i> SoftBus Stable (12ms)</div>
+                        <div style="font-size: 11px; color: var(--success);"><i class="fas fa-check-circle"></i> Power Supply Normal</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="device-grid">
+                <div class="device-card">
+                    <div class="device-header">
+                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                        <div class="device-info">
+                            <div class="device-name">RK3568 Edge Gateway</div>
+                            <div class="device-id">ID: GW-001 | Loc: Intersection A</div>
+                        </div>
+                        <span class="device-status">Online</span>
+                    </div>
+                    <div class="device-metrics">
+                        <div class="metric">
+                            <div class="metric-label">CPU Load</div>
+                            <div class="metric-value" style="color: var(--success);">32%</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">NPU Temp</div>
+                            <div class="metric-value" style="color: var(--warning);">58°C</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Memory</div>
+                            <div class="metric-value">1.2GB / 4GB</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">SoftBus</div>
+                            <div class="metric-value" style="color: var(--success);">12ms</div>
+                        </div>
+                    </div>
+                    <div class="device-actions">
+                        <button class="btn secondary">View Logs</button>
+                        <button class="btn secondary">Reboot</button>
+                    </div>
+                </div>
+                <div class="device-card iot">
+                    <div class="device-header">
+                        <div class="device-icon"><i class="fas fa-wifi"></i></div>
+                        <div class="device-info">
+                            <div class="device-name">Hi3861 IoT Controller</div>
+                            <div class="device-id">ID: IoT-004 | Loc: Light Pole B</div>
+                        </div>
+                        <span class="device-status">Connected</span>
+                    </div>
+                    <div class="device-metrics">
+                        <div class="metric">
+                            <div class="metric-label">WiFi Signal</div>
+                            <div class="metric-value" style="color: var(--success);">-45dBm</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">GPIO Status</div>
+                            <div class="metric-value">Active</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">PWM Output</div>
+                            <div class="metric-value">1000Hz</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Battery</div>
+                            <div class="metric-value" style="color: var(--success);">98%</div>
+                        </div>
+                    </div>
+                    <div class="device-actions">
+                        <button class="btn secondary">Calibrate</button>
+                        <button class="btn secondary">Reboot</button>
+                    </div>
+                </div>
+                <div class="device-card camera">
+                    <div class="device-header">
+                        <div class="device-icon"><i class="fas fa-video"></i></div>
+                        <div class="device-info">
+                            <div class="device-name">1080P Camera</div>
+                            <div class="device-id">ID: CAM-02 | Protocol: GB/T 28181</div>
+                        </div>
+                        <span class="device-status">Streaming</span>
+                    </div>
+                    <div class="device-metrics">
+                        <div class="metric">
+                            <div class="metric-label">Stream</div>
+                            <div class="metric-value" style="color: var(--success);">H.264 30fps</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Bitrate</div>
+                            <div class="metric-value">4Mbps</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Connection</div>
+                            <div class="metric-value" style="color: var(--success);">POE Stable</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">SIP Status</div>
+                            <div class="metric-value" style="color: var(--success);">Registered</div>
+                        </div>
+                    </div>
+                    <div class="device-actions">
+                        <button class="btn secondary">PTZ Control</button>
+                        <button class="btn secondary">Snapshot</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 20px;">
+                <div class="card-title">分布式软总线通信质量 (SoftBus Quality)</div>
+                <div style="display: flex; align-items: center; justify-content: space-around; padding: 20px;">
+                    <div style="text-align: center;">
+                        <div style="width: 60px; height: 60px; border-radius: 50%; border: 3px solid var(--primary); display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 12px;">Gateway</div>
+                    </div>
+                    <div style="flex: 1; height: 2px; background: #333; margin: 0 20px; position: relative;">
+                        <div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--accent);">
+                            <i class="fas fa-bolt"></i> 12ms Latency
+                        </div>
+                        <div style="position: absolute; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, var(--primary), transparent); animation: flow 2s infinite;"></div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="width: 60px; height: 60px; border-radius: 50%; border: 3px solid var(--success); display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                            <i class="fas fa-wifi"></i>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 12px;">Controller</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 7. 算法参数配置 -->
+        <div id="config" class="page">
+            <div class="header">
+                <h2>算法参数配置</h2>
+                <button class="btn" onclick="saveConfig()"><i class="fas fa-save"></i> 保存配置</button>
+            </div>
+            <div class="config-grid">
+                <div class="config-section">
+                    <div class="config-header">
+                        <i class="fas fa-brain"></i>
+                        <h3>AI 视觉识别参数</h3>
+                    </div>
+                    <div class="config-item">
+                        <label><span>YOLO 置信度阈值 (Confidence)</span> <span id="conf-val">0.5</span></label>
+                        <input type="range" min="0.1" max="0.9" step="0.1" value="0.5" oninput="updateConfig('conf-val', this.value)">
+                    </div>
+                    <div class="config-item">
+                        <label><span>IoU 阈值 (Non-Max Suppression)</span> <span id="iou-val">0.45</span></label>
+                        <input type="range" min="0.1" max="0.9" step="0.05" value="0.45" oninput="updateConfig('iou-val', this.value)">
+                    </div>
+                    <div class="config-item">
+                        <label><span>检测帧率 (FPS)</span></label>
+                        <input type="number" value="30" min="15" max="60">
+                    </div>
+                    <div class="config-item">
+                        <label><span>模型精度</span></label>
+                        <select class="btn secondary" style="width: 100%; background: #333; color: white; border: none; margin-top: 5px;">
+                            <option>INT8 (Fastest)</option>
+                            <option>FP16 (Balanced)</option>
+                            <option>FP32 (Most Accurate)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <div class="config-header">
+                        <i class="fas fa-calculator"></i>
+                        <h3>最大压力控制参数</h3>
+                    </div>
+                    <div class="config-item">
+                        <label><span>压力阈值 (Pressure Threshold)</span> <span id="pressure-threshold-val">0.6</span></label>
+                        <input type="range" min="0.3" max="0.9" step="0.1" value="0.6" oninput="updateConfig('pressure-threshold-val', this.value)">
+                    </div>
+                    <div class="config-item">
+                        <label><span>绿波带速度目标 (km/h)</span></label>
+                        <input type="number" value="50" min="30" max="80">
+                    </div>
+                    <div class="config-item">
+                        <label><span>最小绿灯时间 (秒)</span></label>
+                        <input type="number" value="15" min="10" max="30">
+                    </div>
+                    <div class="config-item">
+                        <label><span>最大绿灯时间 (秒)</span></label>
+                        <input type="number" value="90" min="60" max="120">
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 20px;">
+                <div class="card-title">配置历史</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>操作者</th>
+                            <th>修改内容</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>2024-01-15 09:23</td>
+                            <td>admin</td>
+                            <td>YOLO 置信度 0.5 → 0.6</td>
+                            <td style="color: var(--success);">已应用</td>
+                        </tr>
+                        <tr>
+                            <td>2024-01-15 08:45</td>
+                            <td>operator</td>
+                            <td>压力阈值 0.5 → 0.6</td>
+                            <td style="color: var(--success);">已应用</td>
+                        </tr>
+                        <tr>
+                            <td>2024-01-14 16:30</td>
+                            <td>admin</td>
+                            <td>绿波带速度 45 → 50 km/h</td>
+                            <td style="color: var(--success);">已应用</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 8. V2X 车路协同 -->
+        <div id="v2x" class="page">
+            <div class="header">
+                <h2>V2X 车路协同监控 <span class="badge v2x">C-V2X</span></h2>
+                <button class="btn" onclick="simulateEmergency()"><i class="fas fa-ambulance"></i> 模拟应急车辆</button>
+            </div>
+            <div class="v2x-grid">
+                <div>
+                    <div class="v2x-map">
+                        <div class="v2x-road v2x-road-h"></div>
+                        <div class="v2x-road v2x-road-v"></div>
+                        <div class="v2x-vehicle" id="v2x-car-1" style="top: 45%; left: 10%;"></div>
+                        <div class="v2x-vehicle emergency" id="v2x-emergency" style="top: 55%; left: 80%; display: none;"></div>
+                    </div>
+                    <div class="v2x-stats" style="margin-top: 20px;">
+                        <div class="v2x-stat-card">
+                            <div class="v2x-stat-value" id="v2x-latency">12</div>
+                            <div class="v2x-stat-label">端到端延迟 (ms)</div>
+                        </div>
+                        <div class="v2x-stat-card">
+                            <div class="v2x-stat-value" id="v2x-messages">1,245</div>
+                            <div class="v2x-stat-label">今日消息数</div>
+                        </div>
+                        <div class="v2x-stat-card">
+                            <div class="v2x-stat-value" style="color: var(--success);">99.8%</div>
+                            <div class="v2x-stat-label">消息成功率</div>
+                        </div>
+                        <div class="v2x-stat-card">
+                            <div class="v2x-stat-value" style="color: var(--warning);">3</div>
+                            <div class="v2x-stat-label">应急车辆优先</div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="card">
+                        <div class="card-title">V2X 消息日志</div>
+                        <div class="v2x-message-log" id="v2x-log">
+                            <div class="v2x-msg">
+                                <div style="color: var(--v2x-blue);">[09:30:15] BSM Message Received</div>
+                                <div style="color: #666; font-size: 10px;">Vehicle ID: V-00234 | Speed: 45km/h | Heading: 90°</div>
+                            </div>
+                            <div class="v2x-msg">
+                                <div style="color: var(--v2x-blue);">[09:30:16] SPaT Message Sent</div>
+                                <div style="color: #666; font-size: 10px;">Intersection: A-01 | Phase: Green | Remaining: 25s</div>
+                            </div>
+                            <div class="v2x-msg">
+                                <div style="color: var(--v2x-blue);">[09:30:18] MAP Message Broadcast</div>
+                                <div style="color: #666; font-size: 10px;">Lane Count: 4 | Speed Limit: 50km/h</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">通信协议状态</div>
+                        <div style="font-size: 12px; color: #aaa; line-height: 2;">
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> SIP Register: OK<br>
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> RTP Stream: Active<br>
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> C-V2X PC5: Connected<br>
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> GB/T 28181: Compliant<br>
+                            <i class="fas fa-check-circle" style="color: var(--success);"></i> GA/T 497: Compliant
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="footer-status">
+        <div>
+            <span>System Status: </span>
+            <span style="color: var(--success);">Normal</span>
+            <span class="protocol-badge"><div class="dot"></div> GB/T 28181</span>
+            <span class="protocol-badge"><div class="dot"></div> GA/T 497</span>
+            <span class="protocol-badge" style="border-color: var(--v2x-blue);"><div class="dot" style="background: var(--v2x-blue);"></div> C-V2X</span>
+        </div>
+        <div>
+            HarmonyOS Distributed SoftBus v3.0 | RK3568 Edge Gateway | SUMO 5-Ring Network Active
+        </div>
+    </div>
+
+    <script>
+        // 登录逻辑
+        function login() {
+            const status = document.getElementById('login-status');
+            status.style.opacity = '1';
+            setTimeout(() => {
+                document.getElementById('login-overlay').style.display = 'none';
+                initCharts();
+                startSimulation();
+                startMonitorEngine();
+                startV2XSimulation();
+            }, 1500);
+        }
+
+        // 页面切换
+        function showPage(pageId, element) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+            
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            element.classList.add('active');
+
+            if(pageId === 'dashboard') initCharts();
+        }
+
+        // 控制面板滑块
+        function updateSlider(id, val) {
+            document.getElementById(id).innerText = val + 's';
+            addLog(`Phase duration adjusted to ${val}s`);
+        }
+
+        // 手动/自动切换
+        function toggleMode(el) {
+            el.classList.toggle('active');
+            const isAuto = el.classList.contains('active');
+            document.getElementById('mode-text').innerText = isAuto ? 'Auto (AI)' : 'Manual';
+            document.getElementById('mode-text').style.color = isAuto ? 'var(--success)' : 'var(--warning)';
+            addLog(`Mode switched to ${isAuto ? 'Auto' : 'Manual'}`);
+        }
+
+        // 紧急预案
+        function emergencyPlan() {
+            addLog('⚠️ EMERGENCY PLAN ACTIVATED - All Red');
+            document.querySelectorAll('.light, .light-v').forEach(l => l.classList.remove('on'));
+            document.querySelectorAll('.light.red, .light-v.red').forEach(l => l.classList.add('on'));
+            alert('紧急预案已激活 - 所有方向红灯');
+        }
+
+        // 日志系统
+        function addLog(msg) {
+            const consoleEl = document.getElementById('system-log');
+            const time = new Date().toLocaleTimeString('en-GB');
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            div.innerText = `[${time}] ${msg}`;
+            consoleEl.prepend(div);
+            if(consoleEl.children.length > 20) consoleEl.lastChild.remove();
+        }
+
+        // 图表初始化
+        let trafficChartInstance = null;
+        function initCharts() {
+            const ctx = document.getElementById('trafficChart').getContext('2d');
+            if(trafficChartInstance) trafficChartInstance.destroy();
+            
+            trafficChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['0h', '4h', '8h', '12h', '16h', '20h', '24h'],
+                    datasets: [{
+                        label: 'Traffic Flow',
+                        data: [120, 50, 1500, 1200, 1400, 800, 200],
+                        borderColor: '#00ff9d',
+                        backgroundColor: 'rgba(0, 255, 157, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: '#00ff9d'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: '#333' }, ticks: { color: '#666' } },
+                        x: { grid: { display: false }, ticks: { color: '#666' } }
+                    },
+                    animation: { duration: 1000 }
+                }
+            });
+        }
+
+        // ============= 监控主界面核心引擎 =============
+
+        // --- FSM 信号控制器 (带完整红灯倒计时) ---
+        const FSM = {
+            state: 'RED',
+            stateStart: Date.now(),
+            greenDuration: 0,
+            redDuration: 25,
+            vehicleCount: 0,
+            countdown: 0,
+            YELLOW_TIME: 3,
+            MIN_RED_TIME: 8,
+            DEFAULT_RED: 25,
+
+            getGreenDuration(count) {
+                if (count === 0) return 0;
+                if (count <= 10) return 15;
+                if (count <= 15) return 30;
+                return 45;
+            },
+
+            getRedDuration(count) {
+                if (count === 0) return this.DEFAULT_RED;
+                return Math.max(this.MIN_RED_TIME, this.DEFAULT_RED - Math.floor(count * 0.8));
+            },
+
+            update(vehicleCount) {
+                this.vehicleCount = vehicleCount;
+                const now = Date.now();
+                const elapsed = (now - this.stateStart) / 1000;
+
+                if (this.state === 'RED') {
+                    this.redDuration = this.getRedDuration(vehicleCount);
+                    this.countdown = Math.max(0, this.redDuration - elapsed);
+                    if (elapsed >= this.redDuration) {
+                        const dur = this.getGreenDuration(vehicleCount);
+                        this.state = 'GREEN';
+                        this.greenDuration = dur > 0 ? dur : 15;
+                        this.stateStart = now;
+                        this.countdown = this.greenDuration;
+                        addLog(`FSM: RED -> GREEN (${this.greenDuration}s), vehicles=${vehicleCount}`);
+                    }
+                } else if (this.state === 'GREEN') {
+                    const remaining = this.greenDuration - elapsed;
+                    this.countdown = Math.max(0, remaining);
+                    if (remaining <= 0) {
+                        this.state = 'YELLOW';
+                        this.stateStart = now;
+                        this.countdown = this.YELLOW_TIME;
+                        addLog('FSM: GREEN -> YELLOW');
+                    }
+                } else if (this.state === 'YELLOW') {
+                    const remaining = this.YELLOW_TIME - elapsed;
+                    this.countdown = Math.max(0, remaining);
+                    if (remaining <= 0) {
+                        this.state = 'RED';
+                        this.stateStart = now;
+                        this.redDuration = this.getRedDuration(this.vehicleCount);
+                        this.countdown = this.redDuration;
+                        addLog('FSM: YELLOW -> RED');
+                    }
+                }
+            },
+
+            tick() {
+                const elapsed = (Date.now() - this.stateStart) / 1000;
+                if (this.state === 'RED') this.countdown = Math.max(0, this.redDuration - elapsed);
+                else if (this.state === 'GREEN') this.countdown = Math.max(0, this.greenDuration - elapsed);
+                else if (this.state === 'YELLOW') this.countdown = Math.max(0, this.YELLOW_TIME - elapsed);
+            },
+
+            getTotalDuration() {
+                if (this.state === 'RED') return this.redDuration;
+                if (this.state === 'GREEN') return this.greenDuration;
+                return this.YELLOW_TIME;
+            }
+        };
+
+        // =========== ROI 手动标框 + 检测引擎 ===========
+        // 用户手动画的 ROI 列表，每项: { id, name, x, y, w, h, slots }
+        let userROIs = [];
+        let _roiIdCounter = 0;
+        const ROI_COLORS = ['#f5e642', '#00e5ff', '#ff9500', '#a78bfa', '#f472b6'];
+
+        // --- 自动为一个 ROI 区域生成车辆槽位 ---
+        function generateSlotsForROI(roi) {
+            const area = roi.w * roi.h; // % * %
+            // 根据面积决定槽位密度: 每 ~40 平方百分比一个槽位, 最少 3 个最多 18 个
+            const count = Math.max(3, Math.min(18, Math.round(area / 40)));
+            const slots = [];
+            // 远近缩放: 画面中 y 越大(越靠下) 目标越大
+            for (let i = 0; i < count; i++) {
+                const rx = 8 + Math.random() * 84;  // 相对 ROI 的 x%
+                const ry = 5 + Math.random() * 88;  // 相对 ROI 的 y%
+                // 目标绝对 y 位置 → 决定 scale
+                const absY = roi.y + ry / 100 * roi.h;
+                const scale = 0.4 + (absY / 100) * 1.0; // 越靠下越大
+                const types = Math.random() > 0.85 ? ['bus'] :
+                              Math.random() > 0.9 ? ['truck'] : ['car'];
+                slots.push({ rx, ry, types, scale });
+            }
+            return slots;
+        }
+
+        // --- 拖拽画框逻辑 ---
+        let _drawMode = false;
+        let _drawing = false;
+        let _drawStart = null;
+
+        function toggleDrawMode() {
+            _drawMode = !_drawMode;
+            const vc = document.getElementById('video-container');
+            const btn = document.getElementById('btn-draw-roi');
+            const hint = document.getElementById('draw-hint');
+            vc.classList.toggle('drawing-mode', _drawMode);
+            btn.classList.toggle('active', _drawMode);
+            hint.style.display = _drawMode ? 'inline' : 'none';
+        }
+
+        function getRelativePos(e, container) {
+            const rect = container.getBoundingClientRect();
+            return {
+                x: (e.clientX - rect.left) / rect.width * 100,
+                y: (e.clientY - rect.top) / rect.height * 100
+            };
+        }
+
+        (function initDrawHandlers() {
+            // 需要等 DOM 就绪
+            document.addEventListener('DOMContentLoaded', bindDraw);
+            // 如果 DOM 已就绪 (脚本在 body 底部)
+            if (document.readyState !== 'loading') bindDraw();
+
+            function bindDraw() {
+                const vc = document.getElementById('video-container');
+                if (!vc || vc._drawBound) return;
+                vc._drawBound = true;
+                const preview = document.getElementById('roi-draw-preview');
+
+                vc.addEventListener('mousedown', e => {
+                    if (!_drawMode) return;
+                    e.preventDefault();
+                    _drawing = true;
+                    _drawStart = getRelativePos(e, vc);
+                    preview.style.left = _drawStart.x + '%';
+                    preview.style.top = _drawStart.y + '%';
+                    preview.style.width = '0%';
+                    preview.style.height = '0%';
+                    preview.style.display = 'block';
+                });
+
+                vc.addEventListener('mousemove', e => {
+                    if (!_drawing) return;
+                    const cur = getRelativePos(e, vc);
+                    const x = Math.min(_drawStart.x, cur.x);
+                    const y = Math.min(_drawStart.y, cur.y);
+                    const w = Math.abs(cur.x - _drawStart.x);
+                    const h = Math.abs(cur.y - _drawStart.y);
+                    preview.style.left = x + '%';
+                    preview.style.top = y + '%';
+                    preview.style.width = w + '%';
+                    preview.style.height = h + '%';
+                });
+
+                vc.addEventListener('mouseup', e => {
+                    if (!_drawing) return;
+                    _drawing = false;
+                    preview.style.display = 'none';
+                    const end = getRelativePos(e, vc);
+                    const x = Math.min(_drawStart.x, end.x);
+                    const y = Math.min(_drawStart.y, end.y);
+                    const w = Math.abs(end.x - _drawStart.x);
+                    const h = Math.abs(end.y - _drawStart.y);
+                    // 太小的框忽略 (< 3% 宽或高)
+                    if (w < 3 || h < 3) return;
+                    addROI(x, y, w, h);
+                    // 画完自动退出画框模式
+                    toggleDrawMode();
+                });
+
+                vc.addEventListener('mouseleave', () => {
+                    if (_drawing) { _drawing = false; preview.style.display = 'none'; }
+                });
+            }
+        })();
+
+        function addROI(x, y, w, h) {
+            const id = 'roi-user-' + (++_roiIdCounter);
+            const name = 'Zone ' + String.fromCharCode(64 + userROIs.length + 1); // A, B, C...
+            const roi = { id, name, x, y, w, h, colorIdx: (userROIs.length) % ROI_COLORS.length };
+            roi.slots = generateSlotsForROI(roi);
+            userROIs.push(roi);
+            renderPersistentROIs();
+            addLog(`[ROI] Added ${name}: (${x.toFixed(0)}%, ${y.toFixed(0)}%) ${w.toFixed(0)}x${h.toFixed(0)}%`);
+        }
+
+        function removeROI(id) {
+            userROIs = userROIs.filter(r => r.id !== id);
+            renderPersistentROIs();
+        }
+
+        function clearAllROIs() {
+            userROIs = [];
+            _roiIdCounter = 0;
+            renderPersistentROIs();
+        }
+
+        function renderPersistentROIs() {
+            const layer = document.getElementById('roi-persistent-layer');
+            layer.innerHTML = '';
+            userROIs.forEach((roi, i) => {
+                const color = ROI_COLORS[roi.colorIdx];
+                const div = document.createElement('div');
+                div.className = 'roi-persistent';
+                div.style.left = roi.x + '%';
+                div.style.top = roi.y + '%';
+                div.style.width = roi.w + '%';
+                div.style.height = roi.h + '%';
+                // border
+                const border = document.createElement('div');
+                border.className = 'roi-border';
+                border.style.borderColor = color;
+                div.appendChild(border);
+                // label
+                const label = document.createElement('div');
+                label.className = 'roi-label';
+                label.id = 'roi-plabel-' + roi.id;
+                label.style.background = color;
+                label.style.color = '#000';
+                label.textContent = roi.name + ' | Vehicles: 0';
+                div.appendChild(label);
+                // delete button
+                const del = document.createElement('button');
+                del.className = 'roi-delete';
+                del.textContent = '\u00d7';
+                del.onclick = () => removeROI(roi.id);
+                div.appendChild(del);
+                layer.appendChild(div);
+            });
+            document.getElementById('roi-count').textContent = userROIs.length;
+        }
+
+        // --- 检测生成: 只在用户画的 ROI 内 ---
+        function generateDetections() {
+            if (userROIs.length === 0) return [];
+            const allDets = [];
+            userROIs.forEach(roi => {
+                roi.slots.forEach(slot => {
+                    if (Math.random() > 0.72) return;
+                    const type = slot.types[Math.floor(Math.random() * slot.types.length)];
+                    const s = slot.scale;
+                    let bw, bh;
+                    if (type === 'bus') { bw = (7 + Math.random() * 4) * s; bh = (4.5 + Math.random() * 3) * s; }
+                    else if (type === 'truck') { bw = (5.5 + Math.random() * 3) * s; bh = (3.5 + Math.random() * 2) * s; }
+                    else { bw = (3.5 + Math.random() * 2.5) * s; bh = (2.5 + Math.random() * 2) * s; }
+                    const jx = (Math.random() - 0.5) * 4;
+                    const jy = (Math.random() - 0.5) * 4;
+                    const absX = roi.x + (slot.rx + jx) / 100 * roi.w;
+                    const absY = roi.y + (slot.ry + jy) / 100 * roi.h;
+                    const x = Math.max(roi.x + 0.5, Math.min(roi.x + roi.w - bw - 0.5, absX));
+                    const y = Math.max(roi.y + 0.5, Math.min(roi.y + roi.h - bh - 0.5, absY));
+                    const conf = Math.min(0.99, 0.85 + Math.random() * 0.14);
+                    allDets.push({ type, conf, x, y, w: bw, h: bh, roiId: roi.id });
+                });
+            });
+            return allDets;
+        }
+
+        // --- 渲染检测框 (只画 YOLO 小框, ROI 大框在持久层) ---
+        function renderDetections(dets) {
+            const container = document.getElementById('yolo-boxes');
+            container.innerHTML = '';
+            let cars = 0, buses = 0, persons = 0;
+            const roiVehCounts = {};
+            userROIs.forEach(r => { roiVehCounts[r.id] = 0; });
+
+            dets.forEach(d => {
+                const box = document.createElement('div');
+                box.className = `yolo-box cls-${d.type}`;
+                box.style.left = d.x + '%';
+                box.style.top = d.y + '%';
+                box.style.width = d.w + '%';
+                box.style.height = d.h + '%';
+                const rect = document.createElement('div');
+                rect.className = 'yolo-rect';
+                box.appendChild(rect);
+                const label = document.createElement('div');
+                label.className = 'yolo-label';
+                label.textContent = `${d.type}: ${Math.round(d.conf * 100)}%`;
+                box.appendChild(label);
+                container.appendChild(box);
+
+                if (d.type === 'car' || d.type === 'truck') { cars++; roiVehCounts[d.roiId]++; }
+                else if (d.type === 'bus') { buses++; roiVehCounts[d.roiId]++; }
+                else if (d.type === 'person') persons++;
+            });
+
+            // 更新各持久 ROI 标签上的计数
+            userROIs.forEach(roi => {
+                const lbl = document.getElementById('roi-plabel-' + roi.id);
+                if (lbl) {
+                    const cnt = roiVehCounts[roi.id] || 0;
+                    lbl.textContent = `${roi.name} | Vehicles: ${cnt}`;
+                }
+            });
+
+            const vehicleCount = cars + buses;
+            document.getElementById('det-car').textContent = cars;
+            document.getElementById('det-bus').textContent = buses;
+            document.getElementById('det-person').textContent = persons;
+            document.getElementById('bi-veh').textContent = vehicleCount;
+
+            return { vehicleCount, cars, buses, persons };
+        }
+
+        // --- 信号灯 UI 更新 ---
+        // --- 信号灯 UI (四方向 + 圆环倒计时) ---
+        function updateSignalUI() {
+            FSM.tick();
+            const state = FSM.state;
+            const cd = FSM.countdown;
+            const cdText = Math.ceil(cd) + 's';
+            const circumference = 169.6; // 2 * PI * 27
+            const totalDur = FSM.getTotalDuration();
+            const progress = totalDur > 0 ? cd / totalDur : 0;
+            const arcOffset = circumference * (1 - progress);
+            const stateColor = state === 'RED' ? 'var(--danger)' : state === 'GREEN' ? 'var(--success)' : 'var(--warning)';
+
+            // NS 方向 (主干道 = 跟随 FSM)
+            const tlNS = document.getElementById('tl-ns');
+            tlNS.querySelector('.red').classList.toggle('on', state === 'RED');
+            tlNS.querySelector('.yellow').classList.toggle('on', state === 'YELLOW');
+            tlNS.querySelector('.green').classList.toggle('on', state === 'GREEN');
+            document.getElementById('cd-ns').textContent = cdText;
+            document.getElementById('cd-ns').style.color = stateColor;
+            const arcNS = document.getElementById('cd-arc-ns');
+            arcNS.style.strokeDashoffset = arcOffset;
+            arcNS.style.stroke = stateColor;
+
+            // EW 方向 (支路 = NS 的反相)
+            const ewState = state === 'RED' ? 'GREEN' : state === 'GREEN' ? 'RED' : 'YELLOW';
+            const ewColor = ewState === 'RED' ? 'var(--danger)' : ewState === 'GREEN' ? 'var(--success)' : 'var(--warning)';
+            const tlEW = document.getElementById('tl-ew');
+            tlEW.querySelector('.red').classList.toggle('on', ewState === 'RED');
+            tlEW.querySelector('.yellow').classList.toggle('on', ewState === 'YELLOW');
+            tlEW.querySelector('.green').classList.toggle('on', ewState === 'GREEN');
+            document.getElementById('cd-ew').textContent = cdText;
+            document.getElementById('cd-ew').style.color = ewColor;
+            const arcEW = document.getElementById('cd-arc-ew');
+            arcEW.style.strokeDashoffset = arcOffset;
+            arcEW.style.stroke = ewColor;
+
+            // 行人 (NS红灯 = 行人绿灯)
+            const pedGreen = state === 'RED';
+            const pedColor = pedGreen ? 'var(--success)' : 'var(--danger)';
+            const tlPed = document.getElementById('tl-ped');
+            tlPed.querySelector('.red').classList.toggle('on', !pedGreen);
+            tlPed.querySelector('.green').classList.toggle('on', pedGreen);
+            document.getElementById('cd-ped').textContent = pedGreen ? cdText : '--';
+            document.getElementById('cd-ped').style.color = pedColor;
+            const arcPed = document.getElementById('cd-arc-ped');
+            arcPed.style.strokeDashoffset = pedGreen ? arcOffset : circumference;
+            arcPed.style.stroke = pedColor;
+
+            // FSM 中心区
+            document.getElementById('fsm-state-text').textContent = state;
+            document.getElementById('fsm-state-text').style.color = stateColor;
+            document.getElementById('fsm-veh-count').textContent = FSM.vehicleCount;
+            const gd = FSM.greenDuration;
+            document.getElementById('fsm-green-dur').textContent = gd > 0 ? gd + 's' : '--';
+
+            // 压力卡片中的 FSM badge
+            const badge = document.getElementById('fsm-badge');
+            badge.textContent = state;
+            badge.className = 'fsm-state ' + state;
+        }
+
+        // --- 压力可视化 ---
+        // --- 压力三段式可视化 ---
+        let _pressureSmoothed = 0.3;
+        function updatePressure(vehicleCount, personCount) {
+            // Step 1: 检测输入 — 分方向统计
+            const nsQueue = Math.floor(vehicleCount * 0.65);
+            const ewQueue = vehicleCount - nsQueue;
+            document.getElementById('pl-ns-queue').textContent = nsQueue + ' veh';
+            document.getElementById('pl-ns-queue').style.color = nsQueue > 8 ? 'var(--danger)' : 'var(--success)';
+            document.getElementById('pl-ew-queue').textContent = ewQueue + ' veh';
+            document.getElementById('pl-ew-queue').style.color = ewQueue > 5 ? 'var(--warning)' : 'var(--success)';
+            document.getElementById('pl-ped-count').textContent = personCount || 0;
+
+            // Step 2: 压力计算 (EMA 平滑)
+            const exitCap = FSM.state === 'GREEN' ? 8 : 3;
+            const rawPressure = Math.min(1, Math.max(0, (vehicleCount - exitCap + 10) / 20));
+            const alpha = 0.3;
+            _pressureSmoothed = alpha * rawPressure + (1 - alpha) * _pressureSmoothed;
+            const pressure = _pressureSmoothed;
+
+            document.getElementById('pl-entry-val').textContent = vehicleCount;
+            document.getElementById('pl-exit-val').textContent = exitCap;
+
+            // 仪表盘指针: -60° (pressure=0) ~ +60° (pressure=1)
+            const angle = -60 + pressure * 120;
+            document.getElementById('pressure-needle').setAttribute('transform', `rotate(${angle} 50 52)`);
+            const arc = document.getElementById('pressure-arc');
+            arc.style.strokeDashoffset = 119.4 * (1 - pressure);
+            const pColor = pressure < 0.4 ? 'var(--success)' : pressure < 0.7 ? 'var(--warning)' : 'var(--danger)';
+            arc.style.stroke = pColor;
+
+            const valDisp = document.getElementById('pressure-value-display');
+            valDisp.textContent = pressure.toFixed(2);
+            valDisp.style.color = pColor;
+
+            // Step 3: 配时决策
+            const decEl = document.getElementById('pd-decision');
+            const nextGreen = document.getElementById('pd-next-green');
+            const priorityDir = document.getElementById('pd-priority-dir');
+            const reasonEl = document.getElementById('fsm-reason');
+
+            if (vehicleCount === 0) {
+                decEl.textContent = 'HOLD'; decEl.style.color = '#aaa';
+                nextGreen.textContent = '--';
+                reasonEl.textContent = 'No vehicles detected → holding RED';
+            } else {
+                const dur = FSM.getGreenDuration(vehicleCount);
+                decEl.textContent = `G=${dur}s`;
+                decEl.style.color = pColor;
+                nextGreen.textContent = dur + 's';
+                if (nsQueue >= ewQueue) {
+                    reasonEl.textContent = `NS pressure dominant (${nsQueue} vs ${ewQueue}) → prioritize NS green`;
+                } else {
+                    reasonEl.textContent = `EW pressure dominant (${ewQueue} vs ${nsQueue}) → prioritize EW green`;
+                }
+            }
+            priorityDir.textContent = nsQueue >= ewQueue ? 'NS 主干道' : 'EW 支路';
+            priorityDir.style.color = nsQueue >= ewQueue ? 'var(--primary)' : 'var(--warning)';
+
+            // 高亮活跃步骤
+            document.getElementById('pl-step-detect').classList.toggle('active-step', FSM.state === 'RED');
+            document.getElementById('pl-step-calc').classList.add('active-step');
+            document.getElementById('pl-step-decision').classList.toggle('active-step', FSM.state !== 'RED');
+        }
+
+        // --- AI Stats 模拟 ---
+        function updateAIStats() {
+            const npu = Math.floor(Math.random() * 25) + 35;
+            const inferMs = Math.floor(Math.random() * 8) + 42; // 42-50ms 更接近实际板端
+            const boardFps = (1000 / inferMs).toFixed(2);       // ~1fps 板端推理帧率
+            const mem = Math.floor(Math.random() * 30) + 880;   // ~900MB 接近示意图
+            document.getElementById('npu-load').textContent = npu + '%';
+            document.getElementById('npu-load').style.color = npu > 55 ? 'var(--warning)' : '#0f0';
+            document.getElementById('ai-infer-ms').textContent = inferMs;
+            document.getElementById('ai-fps').textContent = Math.floor(1000 / inferMs);
+            document.getElementById('ai-mem').textContent = mem;
+            // 同步板端信息条
+            document.getElementById('bi-ms').textContent = inferMs;
+            document.getElementById('bi-fps').textContent = boardFps;
+        }
+
+        // --- 交通数据面板 ---
+        function updateTrafficData(vehicleCount) {
+            document.getElementById('live-flow').textContent = vehicleCount;
+            const queue = Math.max(0, vehicleCount * 8 + Math.floor(Math.random() * 15));
+            const wait = vehicleCount > 0 ? (vehicleCount * 2.5 + Math.random() * 5).toFixed(1) : '0.0';
+            document.getElementById('live-queue').textContent = queue;
+            document.getElementById('live-wait').textContent = wait;
+        }
+
+        // --- 主循环 ---
+        let monitorTimers = {};
+        function startMonitorEngine() {
+            // 推理周期: 每 1.5s 生成新检测 (模拟板端 ~1fps)
+            monitorTimers.infer = setInterval(() => {
+                const dets = generateDetections();
+                const { vehicleCount, persons } = renderDetections(dets);
+
+                // 更新 FSM
+                FSM.update(vehicleCount);
+
+                // 更新压力可视化 (传入行人数)
+                updatePressure(vehicleCount, persons);
+
+                // 更新交通数据
+                updateTrafficData(vehicleCount);
+            }, 1500);
+
+            // 信号灯 UI: 每 200ms 刷新倒计时
+            monitorTimers.signal = setInterval(updateSignalUI, 200);
+
+            // AI 统计: 每 1s 更新
+            monitorTimers.aiStats = setInterval(updateAIStats, 1000);
+
+            // 其他页面的数据
+            setInterval(() => {
+                const traffic = 12458 + Math.floor(Math.random() * 10);
+                const el = document.getElementById('dash-traffic');
+                if (el) el.textContent = traffic.toLocaleString();
+            }, 3000);
+        }
+
+        function startDynamicData() { /* replaced by startMonitorEngine */ }
+        function updatePressureVisualization() { /* replaced by startMonitorEngine */ }
+
+        // ============= SUMO 5环路网仿真引擎 =============
+        const SUMO = {
+            rings: [60, 110, 160, 210, 260],
+            angleCount: 8,
+            vehicles: [],
+            nodes: [],
+            step: 0,
+            maxStep: 800,
+            running: false,
+            speed: 1,
+            vehicleCount: 50,
+            _animFrame: null,
+            _lastTick: 0,
+
+            init() {
+                this.step = 0;
+                this.running = false;
+                this.createNodes();
+                this.createVehicles();
+                this.updateUI();
+                document.getElementById('sumo-status').textContent = 'Ready';
+                document.getElementById('sumo-status').style.color = 'var(--warning)';
+                document.getElementById('sumo-progress').style.width = '0%';
+                document.getElementById('sumo-step').textContent = '0';
+                document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-play"></i> Start';
+                // 清除事故/施工标记
+                document.getElementById('sumo-markers').innerHTML = '';
+                // 重置环路颜色
+                const ringsG = document.getElementById('sumo-rings');
+                Array.from(ringsG.children).forEach(c => {
+                    c.setAttribute('stroke', 'url(#roadGrad)');
+                    c.removeAttribute('stroke-dasharray');
+                });
+            },
+
+            createNodes() {
+                const g = document.getElementById('traffic-nodes');
+                g.innerHTML = '';
+                this.nodes = [];
+                this.rings.forEach((r) => {
+                    for (let ai = 0; ai < this.angleCount; ai++) {
+                        const angle = (ai * 45) * Math.PI / 180;
+                        const x = 300 + r * Math.sin(angle);
+                        const y = 300 - r * Math.cos(angle);
+                        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                        circle.setAttribute('cx', x);
+                        circle.setAttribute('cy', y);
+                        circle.setAttribute('r', 4.5);
+                        circle.setAttribute('fill', '#52c41a');
+                        g.appendChild(circle);
+                        this.nodes.push({ x, y, state: 'green', el: circle });
+                    }
+                });
+            },
+
+            createVehicles() {
+                const g = document.getElementById('sumo-vehicles');
+                g.innerHTML = '';
+                this.vehicles = [];
+                for (let i = 0; i < this.vehicleCount; i++) {
+                    const isRing = Math.random() > 0.4;
+                    const ring = this.rings[Math.floor(Math.random() * 5)];
+                    const angleStart = Math.random() * 360;
+                    const radialAngle = Math.floor(Math.random() * 8) * 45;
+                    const radialPos = 50 + Math.random() * 220;
+                    const speed = (0.4 + Math.random() * 0.7) * (isRing ? 1 : 1.2);
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('width', 8);
+                    rect.setAttribute('height', 4);
+                    rect.setAttribute('rx', 1);
+                    rect.setAttribute('fill', isRing ? '#00ff9d' : '#00d4ff');
+                    rect.setAttribute('opacity', '0.85');
+                    g.appendChild(rect);
+                    this.vehicles.push({ el: rect, isRing, ring, angle: angleStart, radialAngle, radialPos, speed, baseSpeed: speed });
+                }
+            },
+
+            tick(now) {
+                if (!this.running) return;
+                if (now - this._lastTick < 50) { this._animFrame = requestAnimationFrame(t => this.tick(t)); return; }
+                this._lastTick = now;
+
+                this.step += this.speed;
+                if (this.step > this.maxStep) this.step = this.maxStep;
+
+                // 信号灯切换: 每 30 步
+                if (this.step % 30 < this.speed) {
+                    this.nodes.forEach(n => {
+                        const s = Math.random() > 0.4 ? 'green' : 'red';
+                        n.state = s;
+                        n.el.setAttribute('fill', s === 'green' ? '#52c41a' : '#ff4d4f');
+                    });
+                }
+
+                // 更新车辆位置
+                this.vehicles.forEach(v => {
+                    if (v.isRing) {
+                        v.angle = (v.angle + v.speed * 0.5) % 360;
+                        const rad = v.angle * Math.PI / 180;
+                        const x = 300 + v.ring * Math.sin(rad) - 4;
+                        const y = 300 - v.ring * Math.cos(rad) - 2;
+                        v.el.setAttribute('x', x);
+                        v.el.setAttribute('y', y);
+                        v.el.setAttribute('transform', `rotate(${v.angle + 90} ${x+4} ${y+2})`);
+                    } else {
+                        v.radialPos += v.speed * 0.8;
+                        if (v.radialPos > 280) v.radialPos = 50;
+                        const rad = v.radialAngle * Math.PI / 180;
+                        const x = 300 + v.radialPos * Math.sin(rad) - 4;
+                        const y = 300 - v.radialPos * Math.cos(rad) - 2;
+                        v.el.setAttribute('x', x);
+                        v.el.setAttribute('y', y);
+                        v.el.setAttribute('transform', `rotate(${v.radialAngle + 90} ${x+4} ${y+2})`);
+                    }
+                });
+
+                this.updateUI();
+
+                if (this.step >= this.maxStep) {
+                    this.running = false;
+                    document.getElementById('sumo-status').textContent = 'Completed';
+                    document.getElementById('sumo-status').style.color = 'var(--success)';
+                    document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-play"></i> Start';
+                } else {
+                    this._animFrame = requestAnimationFrame(t => this.tick(t));
+                }
+            },
+
+            updateUI() {
+                document.getElementById('sumo-step').textContent = Math.min(this.step, this.maxStep);
+                document.getElementById('sumo-progress').style.width = ((this.step / this.maxStep) * 100).toFixed(1) + '%';
+                const avgSpeed = (18 + Math.sin(this.step * 0.05) * 6 + Math.random() * 3).toFixed(1);
+                document.getElementById('sumo-avg-speed').textContent = avgSpeed;
+                const stopped = Math.floor(this.vehicles.length * (0.1 + Math.sin(this.step * 0.03) * 0.08));
+                document.getElementById('sumo-stopped').textContent = Math.max(0, stopped);
+                // 动态更新对比数据
+                if (this.step > 100) {
+                    const optSteps = Math.floor(721 - (this.step / this.maxStep) * 15 - Math.random() * 5);
+                    document.getElementById('sumo-opt-time').textContent = optSteps + ' 步';
+                    const imp = ((721 - optSteps) / 721 * 100).toFixed(1);
+                    document.getElementById('sumo-improvement').textContent = '↓ ' + imp + '%';
+                }
+            },
+
+            start() {
+                if (this.step >= this.maxStep) this.init();
+                this.running = true;
+                this._lastTick = 0;
+                document.getElementById('sumo-status').textContent = 'Running...';
+                document.getElementById('sumo-status').style.color = 'var(--accent)';
+                document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-pause"></i> Pause';
+                this._animFrame = requestAnimationFrame(t => this.tick(t));
+            },
+
+            pause() {
+                this.running = false;
+                if (this._animFrame) cancelAnimationFrame(this._animFrame);
+                document.getElementById('sumo-status').textContent = 'Paused';
+                document.getElementById('sumo-status').style.color = 'var(--warning)';
+                document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-play"></i> Resume';
+            }
+        };
+
+        function startSimulation() {
+            SUMO.init();
+        }
+
+        function toggleSim() {
+            if (SUMO.running) SUMO.pause();
+            else SUMO.start();
+        }
+
+        function resetSumo() {
+            SUMO.pause();
+            SUMO.init();
+        }
+
+        function applySumoScenario(scenario) {
+            SUMO.pause();
+            // 清除标记
+            document.getElementById('sumo-markers').innerHTML = '';
+            const ringsG = document.getElementById('sumo-rings');
+            Array.from(ringsG.children).forEach(c => {
+                c.setAttribute('stroke', 'url(#roadGrad)');
+                c.removeAttribute('stroke-dasharray');
+            });
+
+            if (scenario === 'peak') {
+                SUMO.vehicleCount = 50;
+                document.getElementById('sumo-veh-count').textContent = '50';
+            } else if (scenario === 'accident') {
+                SUMO.vehicleCount = 30;
+                document.getElementById('sumo-veh-count').textContent = '30';
+                SUMO.init();
+                // 在第3环+第2放射交叉点标记事故
+                const accNode = SUMO.nodes[2 * 8 + 1]; // ring 2, angle 1
+                if (accNode) {
+                    accNode.el.setAttribute('fill', '#ff9500');
+                    accNode.el.setAttribute('r', 10);
+                    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    marker.setAttribute('x', accNode.x);
+                    marker.setAttribute('y', accNode.y - 14);
+                    marker.setAttribute('text-anchor', 'middle');
+                    marker.setAttribute('fill', '#ff4d4f');
+                    marker.setAttribute('font-size', '18');
+                    marker.textContent = '⚠';
+                    document.getElementById('sumo-markers').appendChild(marker);
+                    // 事故区域高亮环
+                    const accRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    accRing.setAttribute('cx', accNode.x);
+                    accRing.setAttribute('cy', accNode.y);
+                    accRing.setAttribute('r', 25);
+                    accRing.setAttribute('fill', 'none');
+                    accRing.setAttribute('stroke', '#ff4d4f');
+                    accRing.setAttribute('stroke-width', '2');
+                    accRing.setAttribute('stroke-dasharray', '5 3');
+                    accRing.setAttribute('opacity', '0.6');
+                    document.getElementById('sumo-markers').appendChild(accRing);
+                }
+                return;
+            } else if (scenario === 'roadwork') {
+                SUMO.vehicleCount = 40;
+                document.getElementById('sumo-veh-count').textContent = '40';
+                SUMO.init();
+                // 第3环标记施工
+                const ring3 = ringsG.children[2];
+                ring3.setAttribute('stroke', '#f97316');
+                ring3.setAttribute('stroke-dasharray', '20 10');
+                // 施工标记文字
+                const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                txt.setAttribute('x', 300);
+                txt.setAttribute('y', 300 - 160 - 16);
+                txt.setAttribute('text-anchor', 'middle');
+                txt.setAttribute('fill', '#f97316');
+                txt.setAttribute('font-size', '11');
+                txt.setAttribute('font-family', 'Consolas');
+                txt.textContent = '🚧 CONSTRUCTION';
+                document.getElementById('sumo-markers').appendChild(txt);
+                return;
+            }
+            SUMO.init();
+        }
+
+        // 场景演示逻辑
+        const scenarios = [
+            "<span class='highlight'>Step 1:</span> 检测到早高峰流量 → 自动延长直行绿灯至 60 秒。<br><span style='color: #666; font-size: 12px;'>System is analyzing traffic flow density using RK3568 NPU...</span>",
+            "<span class='highlight'>Step 2:</span> 行人过街请求在 Crosswork A3 被触发 → 切换行人绿灯 15 秒。<br><span style='color: #666; font-size: 12px;'>Hi3861 IoT Controller received pedestrian button signal...</span>",
+            "<span class='highlight'>Step 3:</span> 救护车 GPS 信号接收 → 路线 B7 激活绿波带。<br><span style='color: #666; font-size: 12px;'>V2X Communication established. Priority Level: High...</span>",
+            "<span class='highlight'>Step 4:</span> 检测到交通事故 → 所有红灯激活 2 分钟响应。<br><span style='color: #666; font-size: 12px;'>Emergency Protocol Activated. Notifying Traffic Police...</span>",
+            "<span class='highlight'>Step 5:</span> 施工区域管理 → 调整周边路口相位序列。<br><span style='color: #666; font-size: 12px;'>Construction Zone Map Updated. Rerouting traffic...</span>"
+        ];
+        let currentScenario = 0;
+
+        function selectScenario(index) {
+            currentScenario = index;
+            document.querySelectorAll('.scenario-card').forEach((c, i) => {
+                c.classList.toggle('active', i === index);
+            });
+            document.getElementById('demo-progress').style.width = ((index + 1) * 20) + '%';
+            document.getElementById('commentary-text').innerHTML = scenarios[index];
+        }
+
+        function nextScenario() {
+            currentScenario = (currentScenario + 1) % 5;
+            selectScenario(currentScenario);
+        }
+        
+        function prevScenario() {
+            currentScenario = (currentScenario - 1 + 5) % 5;
+            selectScenario(currentScenario);
+        }
+
+        // 设备拓扑刷新
+        function refreshDevices() {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+            setTimeout(() => {
+                btn.innerHTML = '<i class="fas fa-sync"></i> 刷新状态';
+                addLog("Device topology refreshed via SoftBus");
+            }, 1000);
+        }
+
+        // 算法配置更新
+        function updateConfig(id, val) {
+            document.getElementById(id).innerText = val;
+        }
+
+        function saveConfig() {
+            addLog("Configuration saved and applied to RK3568 Gateway");
+            alert("配置已保存并同步到边缘网关");
+        }
+
+        // 报表导出 (GA/T 497 标准)
+        function exportReport() {
+            const csvContent = "text/csv;charset=utf-8," 
+                + "LaneID,TimeSlot,Flow,AvgSpeed,QueueLength,Saturation\n"
+                + "L01,08:00-08:15,124,45.2,120m,0.85\n"
+                + "L02,08:00-08:15,98,42.1,80m,0.72\n"
+                + "L03,08:00-08:15,156,38.5,150m,0.91\n"
+                + "L04,08:00-08:15,45,50.0,20m,0.35";
+            
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "GA_T497_Traffic_Report.csv");
+            document.body.appendChild(link);
+            link.click();
+            
+            addLog("Report exported complying with GA/T 497-2016 Standard");
+            alert("已生成符合 GA/T 497-2016 标准的报表\n包含字段：车道、时段、流量、速度、排队长度、饱和度");
+        }
+
+        // V2X 仿真
+        function startV2XSimulation() {
+            setInterval(() => {
+                const latency = Math.floor(Math.random() * 10) + 8;
+                document.getElementById('v2x-latency').innerText = latency;
+            }, 2000);
+        }
+
+        function simulateEmergency() {
+            const emergencyCar = document.getElementById('v2x-emergency');
+            emergencyCar.style.display = 'block';
+            
+            const log = document.getElementById('v2x-log');
+            const time = new Date().toLocaleTimeString('en-GB');
+            const msg = document.createElement('div');
+            msg.className = 'v2x-msg emergency';
+            msg.innerHTML = `
+                <div style="color: var(--danger);">[${time}] EMERGENCY VEHICLE DETECTED</div>
+                <div style="color: #666; font-size: 10px;">Vehicle Type: Ambulance | Priority: HIGH | Route: B7</div>
+            `;
+            log.prepend(msg);
+            
+            addLog("🚑 Emergency vehicle detected - Green wave activated on Route B7");
+            
+            setTimeout(() => {
+                let pos = 80;
+                const interval = setInterval(() => {
+                    pos -= 2;
+                    emergencyCar.style.left = pos + '%';
+                    if(pos < 10) {
+                        clearInterval(interval);
+                        emergencyCar.style.display = 'none';
+                    }
+                }, 100);
+            }, 500);
+        }
+    </script>
+</body>
+</html>

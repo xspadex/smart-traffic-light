@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鸿蒙智慧交通 - 场景动画演示</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { 
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); 
+            color: white; 
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #00ff9d 0%, #0078d4 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        /* 场景选择器 */
+        .scenario-selector {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .scenario-card {
+            background: rgba(30, 41, 59, 0.8);
+            border: 2px solid #475569;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .scenario-card:hover {
+            transform: translateY(-5px);
+            border-color: #00ff9d;
+            box-shadow: 0 10px 30px rgba(0, 255, 157, 0.2);
+        }
+        
+        .scenario-card.active {
+            background: rgba(0, 255, 157, 0.1);
+            border-color: #00ff9d;
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+        }
+        
+        .scenario-card i {
+            font-size: 32px;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        .scenario-card h3 {
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        
+        .scenario-card p {
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        
+        /* 十字路口视图 */
+        .intersection-container {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 30px;
+            border: 1px solid #334155;
+            margin-bottom: 30px;
+        }
+        
+        .intersection-view {
+            position: relative;
+            width: 100%;
+            height: 550px;
+            background: #1e293b;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        /* 道路 - 主干道（南北向） */
+        .road-main {
+            position: absolute;
+            width: 120px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #334155;
+        }
+        
+        .road-main::before {
+            content: '';
+            position: absolute;
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: repeating-linear-gradient(
+                to bottom,
+                #fff 0px,
+                #fff 20px,
+                transparent 20px,
+                transparent 40px
+            );
+            opacity: 0.5;
+        }
+        
+        /* 道路 - 支路（东西向） */
+        .road-branch {
+            position: absolute;
+            width: 100%;
+            height: 100px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #475569;
+        }
+        
+        .road-branch::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: repeating-linear-gradient(
+                to right,
+                #fff 0px,
+                #fff 20px,
+                transparent 20px,
+                transparent 40px
+            );
+            opacity: 0.5;
+        }
+        
+        /* 路口中心区域（扩大） */
+        .intersection-center {
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: #334155;
+            border-radius: 8px;
+            z-index: 1;
+        }
+        
+        /* 斑马线 - 条状细线（每条独立） */
+        .crosswalk-stripe {
+            position: absolute;
+            background: white;
+            opacity: 0.9;
+            z-index: 2;
+        }
+        
+        /* 北向斑马线（8条细线） */
+        .crosswalk-north-1 { width: 120px; height: 4px; top: 40%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-2 { width: 120px; height: 4px; top: 41.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-3 { width: 120px; height: 4px; top: 43%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-4 { width: 120px; height: 4px; top: 44.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-5 { width: 120px; height: 4px; top: 46%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-6 { width: 120px; height: 4px; top: 47.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-7 { width: 120px; height: 4px; top: 49%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-north-8 { width: 120px; height: 4px; top: 50.5%; left: 50%; transform: translateX(-50%); }
+        
+        /* 南向斑马线（8条细线） */
+        .crosswalk-south-1 { width: 120px; height: 4px; bottom: 40%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-2 { width: 120px; height: 4px; bottom: 41.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-3 { width: 120px; height: 4px; bottom: 43%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-4 { width: 120px; height: 4px; bottom: 44.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-5 { width: 120px; height: 4px; bottom: 46%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-6 { width: 120px; height: 4px; bottom: 47.5%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-7 { width: 120px; height: 4px; bottom: 49%; left: 50%; transform: translateX(-50%); }
+        .crosswalk-south-8 { width: 120px; height: 4px; bottom: 50.5%; left: 50%; transform: translateX(-50%); }
+        
+        /* 西向斑马线（8条细线） */
+        .crosswalk-west-1 { width: 4px; height: 100px; left: 40%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-2 { width: 4px; height: 100px; left: 41.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-3 { width: 4px; height: 100px; left: 43%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-4 { width: 4px; height: 100px; left: 44.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-5 { width: 4px; height: 100px; left: 46%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-6 { width: 4px; height: 100px; left: 47.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-7 { width: 4px; height: 100px; left: 49%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-west-8 { width: 4px; height: 100px; left: 50.5%; top: 50%; transform: translateY(-50%); }
+        
+        /* 东向斑马线（8条细线） */
+        .crosswalk-east-1 { width: 4px; height: 100px; right: 40%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-2 { width: 4px; height: 100px; right: 41.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-3 { width: 4px; height: 100px; right: 43%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-4 { width: 4px; height: 100px; right: 44.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-5 { width: 4px; height: 100px; right: 46%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-6 { width: 4px; height: 100px; right: 47.5%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-7 { width: 4px; height: 100px; right: 49%; top: 50%; transform: translateY(-50%); }
+        .crosswalk-east-8 { width: 4px; height: 100px; right: 50.5%; top: 50%; transform: translateY(-50%); }
+        
+        /* 停车线 */
+        .stop-line {
+            position: absolute;
+            width: 120px;
+            height: 4px;
+            background: white;
+            opacity: 0.8;
+            z-index: 2;
+        }
+        
+        .stop-line-north { top: 38%; left: 50%; transform: translateX(-50%); }
+        .stop-line-south { bottom: 38%; left: 50%; transform: translateX(-50%); }
+        .stop-line-west { left: 38%; top: 50%; transform: translateY(-50%) rotate(90deg); width: 100px; }
+        .stop-line-east { right: 38%; top: 50%; transform: translateY(-50%) rotate(90deg); width: 100px; }
+        
+        /* 车辆 */
+        .vehicle {
+            position: absolute;
+            width: 28px;
+            height: 14px;
+            border-radius: 3px;
+            transition: all 0.5s ease;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        }
+        
+        .vehicle.main-north {
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+            transform: rotate(90deg);
+        }
+        
+        .vehicle.main-south {
+            background: linear-gradient(135deg, #34d399, #10b981);
+            transform: rotate(-90deg);
+        }
+        
+        .vehicle.branch-west {
+            background: linear-gradient(135deg, #f472b6, #ec4899);
+        }
+        
+        .vehicle.branch-east {
+            background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+        }
+        
+        .vehicle.emergency {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            box-shadow: 0 0 15px #ef4444;
+            animation: pulse 1s infinite;
+        }
+        
+        .vehicle.bus {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            width: 40px;
+            height: 16px;
+        }
+        
+        .vehicle.accident {
+            background: linear-gradient(135deg, #6b7280, #4b5563);
+            opacity: 0.7;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        /* 交通信号灯 - 四个方向各一个 */
+        .traffic-light {
+            position: absolute;
+            width: 20px;
+            height: 55px;
+            background: #0f172a;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-evenly;
+            padding: 6px 4px;
+            z-index: 20;
+            border: 2px solid #475569;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+        }
+        
+        .traffic-light-north { top: 30%; left: 47%; }
+        .traffic-light-south { bottom: 30%; right: 47%; }
+        .traffic-light-west { top: 47%; left: 30%; transform: rotate(90deg); }
+        .traffic-light-east { bottom: 47%; right: 30%; transform: rotate(90deg); }
+        
+        .light {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #333;
+            transition: all 0.3s;
+        }
+        
+        .light.red.active { 
+            background: #ef4444; 
+            box-shadow: 0 0 12px #ef4444; 
+        }
+        .light.yellow.active { 
+            background: #f59e0b; 
+            box-shadow: 0 0 12px #f59e0b; 
+        }
+        .light.green.active { 
+            background: #10b981; 
+            box-shadow: 0 0 12px #10b981; 
+        }
+        
+        /* 方向标签 */
+        .direction-label {
+            position: absolute;
+            font-size: 11px;
+            color: #94a3b8;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 30;
+            border: 1px solid #334155;
+        }
+        
+        .label-north { top: 10px; left: 50%; transform: translateX(-50%); }
+        .label-south { bottom: 10px; left: 50%; transform: translateX(-50%); }
+        .label-west { top: 50%; left: 10px; transform: translateY(-50%); }
+        .label-east { top: 50%; right: 10px; transform: translateY(-50%); }
+        
+        /* 控制面板 */
+        .control-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        .status-panel {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid #334155;
+        }
+        
+        .status-display {
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid #334155;
+        }
+        
+        .status-row:last-child { border-bottom: none; }
+        
+        .status-label { color: #94a3b8; font-size: 13px; }
+        .status-value { font-weight: bold; font-size: 14px; }
+        .status-value.warning { color: #f59e0b; }
+        .status-value.success { color: #10b981; }
+        .status-value.danger { color: #ef4444; }
+        
+        .strategy-box {
+            background: rgba(0, 255, 157, 0.1);
+            border: 1px solid #00ff9d;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .strategy-box h4 {
+            color: #00ff9d;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+        
+        .strategy-box ul {
+            font-size: 12px;
+            color: #94a3b8;
+            padding-left: 20px;
+        }
+        
+        .strategy-box li {
+            margin-bottom: 5px;
+        }
+        
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #00ff9d 0%, #0078d4 100%);
+            color: #0f172a;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 255, 157, 0.4);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: #334155;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #475569;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #1e293b;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff9d 0%, #0078d4 100%);
+            width: 0%;
+            transition: width 0.5s;
+        }
+        
+        .log-console {
+            background: #0f172a;
+            border-radius: 8px;
+            padding: 15px;
+            height: 180px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            border: 1px solid #334155;
+        }
+        
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid #00ff9d;
+            padding-left: 10px;
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        /* 结果对比面板 */
+        .result-panel {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid #334155;
+        }
+        
+        .result-title {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #00ff9d;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .comparison-item {
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .comparison-item.traditional {
+            border: 2px solid #f59e0b;
+        }
+        
+        .comparison-item.smart {
+            border: 2px solid #10b981;
+        }
+        
+        .comparison-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-bottom: 10px;
+        }
+        
+        .comparison-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .comparison-item.traditional .comparison-value { color: #f59e0b; }
+        .comparison-item.smart .comparison-value { color: #10b981; }
+        
+        .comparison-unit {
+            font-size: 14px;
+            color: #64748b;
+        }
+        
+        .improvement-badge {
+            grid-column: 1 / -1;
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        /* 施工区域 */
+        .construction-zone {
+            position: absolute;
+            background: rgba(249, 115, 22, 0.2);
+            border: 3px dashed #f97316;
+            border-radius: 8px;
+            z-index: 5;
+            display: none;
+        }
+        
+        /* 行人 */
+        .pedestrian {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #10b981;
+            border-radius: 50%;
+            z-index: 15;
+            display: none;
+            box-shadow: 0 0 8px #10b981;
+        }
+        
+        /* 事故车辆 */
+        .accident-vehicle {
+            position: absolute;
+            z-index: 15;
+            display: none;
+        }
+        
+        /* 策略说明 */
+        .strategy-display {
+            background: rgba(0, 120, 212, 0.15);
+            border: 1px solid #0078d4;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .strategy-display h4 {
+            color: #00ff9d;
+            font-size: 13px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .strategy-display p {
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚦 鸿蒙智慧交通 - 场景动画演示系统</h1>
+            <p>基于最大压力控制算法的智能信号优化</p>
+        </div>
+        
+        <!-- 场景选择器 -->
+        <div class="scenario-selector">
+            <div class="scenario-card active" onclick="selectScenario(0)">
+                <i>🌅</i>
+                <h3>早高峰调度</h3>
+                <p>7:30-9:00</p>
+            </div>
+            <div class="scenario-card" onclick="selectScenario(1)">
+                <i>🚶</i>
+                <h3>行人过街优先</h3>
+                <p>Detect Pedestrian</p>
+            </div>
+            <div class="scenario-card" onclick="selectScenario(2)">
+                <i>🚑</i>
+                <h3>应急车辆优先</h3>
+                <p>Green Wave</p>
+            </div>
+            <div class="scenario-card" onclick="selectScenario(3)">
+                <i>⚠️</i>
+                <h3>交通事故响应</h3>
+                <p>2min Response</p>
+            </div>
+            <div class="scenario-card" onclick="selectScenario(4)">
+                <i>🚧</i>
+                <h3>施工管理</h3>
+                <p>3 Days Plan</p>
+            </div>
+        </div>
+        
+        <!-- 十字路口视图 -->
+        <div class="intersection-container">
+            <div class="intersection-view" id="intersection">
+                <!-- 道路 -->
+                <div class="road-main"></div>
+                <div class="road-branch"></div>
+                
+                <!-- 路口中心区域（扩大） -->
+                <div class="intersection-center"></div>
+                
+                <!-- 斑马线 - 条状细线（北向8条） -->
+                <div class="crosswalk-stripe crosswalk-north-1"></div>
+                <div class="crosswalk-stripe crosswalk-north-2"></div>
+                <div class="crosswalk-stripe crosswalk-north-3"></div>
+                <div class="crosswalk-stripe crosswalk-north-4"></div>
+                <div class="crosswalk-stripe crosswalk-north-5"></div>
+                <div class="crosswalk-stripe crosswalk-north-6"></div>
+                <div class="crosswalk-stripe crosswalk-north-7"></div>
+                <div class="crosswalk-stripe crosswalk-north-8"></div>
+                
+                <!-- 斑马线 - 条状细线（南向8条） -->
+                <div class="crosswalk-stripe crosswalk-south-1"></div>
+                <div class="crosswalk-stripe crosswalk-south-2"></div>
+                <div class="crosswalk-stripe crosswalk-south-3"></div>
+                <div class="crosswalk-stripe crosswalk-south-4"></div>
+                <div class="crosswalk-stripe crosswalk-south-5"></div>
+                <div class="crosswalk-stripe crosswalk-south-6"></div>
+                <div class="crosswalk-stripe crosswalk-south-7"></div>
+                <div class="crosswalk-stripe crosswalk-south-8"></div>
+                
+                <!-- 斑马线 - 条状细线（西向8条） -->
+                <div class="crosswalk-stripe crosswalk-west-1"></div>
+                <div class="crosswalk-stripe crosswalk-west-2"></div>
+                <div class="crosswalk-stripe crosswalk-west-3"></div>
+                <div class="crosswalk-stripe crosswalk-west-4"></div>
+                <div class="crosswalk-stripe crosswalk-west-5"></div>
+                <div class="crosswalk-stripe crosswalk-west-6"></div>
+                <div class="crosswalk-stripe crosswalk-west-7"></div>
+                <div class="crosswalk-stripe crosswalk-west-8"></div>
+                
+                <!-- 斑马线 - 条状细线（东向8条） -->
+                <div class="crosswalk-stripe crosswalk-east-1"></div>
+                <div class="crosswalk-stripe crosswalk-east-2"></div>
+                <div class="crosswalk-stripe crosswalk-east-3"></div>
+                <div class="crosswalk-stripe crosswalk-east-4"></div>
+                <div class="crosswalk-stripe crosswalk-east-5"></div>
+                <div class="crosswalk-stripe crosswalk-east-6"></div>
+                <div class="crosswalk-stripe crosswalk-east-7"></div>
+                <div class="crosswalk-stripe crosswalk-east-8"></div>
+                
+                <!-- 停车线 -->
+                <div class="stop-line stop-line-north"></div>
+                <div class="stop-line stop-line-south"></div>
+                <div class="stop-line stop-line-west"></div>
+                <div class="stop-line stop-line-east"></div>
+                
+                <!-- 方向标签 -->
+                <div class="direction-label label-north">📍 主干道（北）</div>
+                <div class="direction-label label-south">📍 主干道（南）</div>
+                <div class="direction-label label-west">📍 支路（西）</div>
+                <div class="direction-label label-east">📍 支路（东）</div>
+                
+                <!-- 车辆容器 -->
+                <div id="vehicles"></div>
+                
+                <!-- 交通信号灯（四个方向） -->
+                <div class="traffic-light traffic-light-north" id="light-north">
+                    <div class="light red active"></div>
+                    <div class="light yellow"></div>
+                    <div class="light green"></div>
+                </div>
+                <div class="traffic-light traffic-light-south" id="light-south">
+                    <div class="light red active"></div>
+                    <div class="light yellow"></div>
+                    <div class="light green"></div>
+                </div>
+                <div class="traffic-light traffic-light-west" id="light-west">
+                    <div class="light red active"></div>
+                    <div class="light yellow"></div>
+                    <div class="light green"></div>
+                </div>
+                <div class="traffic-light traffic-light-east" id="light-east">
+                    <div class="light red active"></div>
+                    <div class="light yellow"></div>
+                    <div class="light green"></div>
+                </div>
+                
+                <!-- 施工区域 -->
+                <div class="construction-zone" id="construction" style="top: 25%; left: 60%; width: 100px; height: 80px;"></div>
+                
+                <!-- 行人（6个） -->
+                <div class="pedestrian" id="pedestrian-1" style="top: 41%; left: 44%;"></div>
+                <div class="pedestrian" id="pedestrian-2" style="top: 41%; left: 47%;"></div>
+                <div class="pedestrian" id="pedestrian-3" style="top: 41%; left: 50%;"></div>
+                <div class="pedestrian" id="pedestrian-4" style="top: 41%; left: 53%;"></div>
+                <div class="pedestrian" id="pedestrian-5" style="top: 41%; left: 56%;"></div>
+                <div class="pedestrian" id="pedestrian-6" style="top: 41%; left: 59%;"></div>
+                
+                <!-- 事故车辆 -->
+                <div class="vehicle accident-vehicle" id="accident-car-1" style="top: 48%; left: 48%; transform: rotate(45deg);"></div>
+                <div class="vehicle accident-vehicle" id="accident-car-2" style="top: 48%; left: 52%; transform: rotate(-45deg);"></div>
+            </div>
+        </div>
+        
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <div class="status-panel">
+                <div class="status-display">
+                    <div class="status-row">
+                        <span class="status-label">当前场景</span>
+                        <span class="status-value" id="current-scenario">早高峰调度 (7:30-9:00)</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">主干道车流量</span>
+                        <span class="status-value warning" id="main-flow">高密度 (12辆/分钟)</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">支路车流量</span>
+                        <span class="status-value success" id="branch-flow">低密度 (2辆/分钟)</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">压力值 (Pressure)</span>
+                        <span class="status-value warning" id="pressure-value">0.73 (高压力)</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">系统状态</span>
+                        <span class="status-value" id="system-status">⏸️ 等待处理</span>
+                    </div>
+                </div>
+                
+                <!-- 优化策略说明 -->
+                <div class="strategy-display" id="strategy-display">
+                    <h4><i class="fas fa-lightbulb"></i> 优化策略</h4>
+                    <p id="strategy-text">主干道车流量大，系统自动延长直行绿灯时长至60秒；支路车流量小，缩短为20秒；检测到公交车到达，给予信号优先（绿灯延长5秒）</p>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="optimize-btn" onclick="startOptimization()">
+                        🚀 启动智能优化
+                    </button>
+                    <button class="btn btn-secondary" onclick="resetScenario()">
+                        🔄 重置场景
+                    </button>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                
+                <div class="log-console" id="log-console">
+                    <div class="log-entry">[系统就绪] 请选择场景并点击"启动智能优化"开始演示</div>
+                </div>
+            </div>
+            
+            <div class="result-panel">
+                <div class="result-title">
+                    <i class="fas fa-chart-bar"></i> 优化效果对比
+                </div>
+                <div class="comparison-grid">
+                    <div class="comparison-item traditional">
+                        <div class="comparison-label">传统固定信号</div>
+                        <div class="comparison-value" id="trad-wait">120<span class="comparison-unit">秒</span></div>
+                        <div class="comparison-label">平均等待时间</div>
+                    </div>
+                    <div class="comparison-item smart">
+                        <div class="comparison-label">鸿蒙智能信号</div>
+                        <div class="comparison-value" id="smart-wait">32<span class="comparison-unit">秒</span></div>
+                        <div class="comparison-label">平均等待时间</div>
+                    </div>
+                    <div class="comparison-item traditional">
+                        <div class="comparison-label">传统固定信号</div>
+                        <div class="comparison-value" id="trad-queue">45<span class="comparison-unit">辆</span></div>
+                        <div class="comparison-label">排队长度</div>
+                    </div>
+                    <div class="comparison-item smart">
+                        <div class="comparison-label">鸿蒙智能信号</div>
+                        <div class="comparison-value" id="smart-queue">12<span class="comparison-unit">辆</span></div>
+                        <div class="comparison-label">排队长度</div>
+                    </div>
+                    <div class="improvement-badge" id="improvement">
+                        📈 通行效率提升 73.3% | 等待时间减少 73.3%
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentScenario = 0;
+        let isProcessing = false;
+        
+        const scenarios = [
+            {
+                name: "早高峰调度",
+                time: "7:30-9:00",
+                mainFlow: "高密度 (12辆/分钟)",
+                branchFlow: "低密度 (2辆/分钟)",
+                pressure: "0.73 (高压力)",
+                strategy: "主干道车流量大，系统自动延长直行绿灯时长至60秒；支路车流量小，缩短为20秒；检测到公交车到达，给予信号优先（绿灯延长5秒）",
+                action: "延长直行绿灯至60秒，支路红灯",
+                tradWait: 120,
+                smartWait: 32,
+                tradQueue: 45,
+                smartQueue: 12,
+                mainVehicles: 18,
+                branchVehicles: 4,
+                lightPattern: "main-green-extended"
+            },
+            {
+                name: "行人过街优先保护",
+                time: "检测到行人",
+                mainFlow: "中等密度",
+                branchFlow: "中等密度",
+                pressure: "0.45 (中压力)",
+                strategy: "摄像头检测到斑马线有行人等待，当前相位结束后切换至行人绿灯，行人绿灯时长15秒，所有方向车辆红灯等待",
+                action: "切换行人绿灯15秒，所有车辆红灯",
+                tradWait: 45,
+                smartWait: 15,
+                tradQueue: 18,
+                smartQueue: 5,
+                mainVehicles: 8,
+                branchVehicles: 6,
+                lightPattern: "all-red-pedestrian"
+            },
+            {
+                name: "应急车辆优先通行",
+                time: "救护车/消防车",
+                mainFlow: "绿波带激活",
+                branchFlow: "让行",
+                pressure: "0.90 (紧急)",
+                strategy: "通过视觉+V2X信号识别救护车/消防车，规划最优通行路径，沿线信号灯全部切换为绿灯，形成绿波带保障应急车辆快速通过",
+                action: "全线绿灯，形成绿波带",
+                tradWait: 90,
+                smartWait: 0,
+                tradQueue: 30,
+                smartQueue: 0,
+                mainVehicles: 10,
+                branchVehicles: 5,
+                lightPattern: "all-green-wave"
+            },
+            {
+                name: "交通事故响应",
+                time: "事故检测",
+                mainFlow: "拥堵",
+                branchFlow: "拥堵",
+                pressure: "0.95 (严重)",
+                strategy: "检测到交通事故，全红灯2分钟响应，启动应急预案，通知交警部门，引导车辆绕行",
+                action: "全红灯2分钟，启动应急响应",
+                tradWait: 300,
+                smartWait: 120,
+                tradQueue: 80,
+                smartQueue: 35,
+                mainVehicles: 25,
+                branchVehicles: 15,
+                lightPattern: "all-red-emergency"
+            },
+            {
+                name: "施工管理",
+                time: "3天施工期",
+                mainFlow: "绕行调整",
+                branchFlow: "分流",
+                pressure: "0.60 (中高)",
+                strategy: "计划性施工，调整相位序列引导车辆绕行，支路分流，施工区域设置警示标志，工期3天",
+                action: "调整相位序列，引导绕行",
+                tradWait: 150,
+                smartWait: 65,
+                tradQueue: 55,
+                smartQueue: 22,
+                mainVehicles: 15,
+                branchVehicles: 10,
+                lightPattern: "detour-mode"
+            }
+        ];
+        
+        function selectScenario(index) {
+            if (isProcessing) return;
+            
+            currentScenario = index;
+            document.querySelectorAll('.scenario-card').forEach((card, i) => {
+                card.classList.toggle('active', i === index);
+            });
+            
+            updateStatus();
+            addLog(`[场景切换] 已切换到：${scenarios[index].name}`);
+            resetScenario();
+        }
+        
+        function updateStatus() {
+            const s = scenarios[currentScenario];
+            document.getElementById('current-scenario').textContent = `${s.name} (${s.time})`;
+            document.getElementById('main-flow').textContent = s.mainFlow;
+            document.getElementById('branch-flow').textContent = s.branchFlow;
+            document.getElementById('pressure-value').textContent = s.pressure;
+            document.getElementById('system-status').textContent = '⏸️ 等待处理';
+            document.getElementById('system-status').className = 'status-value';
+            document.getElementById('strategy-text').textContent = s.strategy;
+        }
+        
+        function addLog(message) {
+            const console = document.getElementById('log-console');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString('zh-CN');
+            entry.textContent = `[${time}] ${message}`;
+            console.appendChild(entry);
+            console.scrollTop = console.scrollHeight;
+        }
+        
+        function createVehicles(scenario) {
+            const container = document.getElementById('vehicles');
+            container.innerHTML = '';
+            
+            const s = scenarios[scenario];
+            
+            // 主干道车辆（从北向南）
+            for (let i = 0; i < s.mainVehicles; i++) {
+                const vehicle = document.createElement('div');
+                vehicle.className = 'vehicle main-north';
+                vehicle.style.left = `${47 + (i % 2) * 4}%`;
+                vehicle.style.top = `${5 + (i * 3.5)}%`;
+                vehicle.dataset.initialTop = 5 + (i * 3.5);
+                vehicle.dataset.type = 'main';
+                container.appendChild(vehicle);
+            }
+            
+            // 支路车辆（从西向东）
+            for (let i = 0; i < s.branchVehicles; i++) {
+                const vehicle = document.createElement('div');
+                vehicle.className = 'vehicle branch-west';
+                vehicle.style.left = `${5 + (i * 5)}%`;
+                vehicle.style.top = `${48 + (i % 2) * 3}%`;
+                vehicle.dataset.initialLeft = 5 + (i * 5);
+                vehicle.dataset.type = 'branch';
+                container.appendChild(vehicle);
+            }
+            
+            // 场景2：添加公交车
+            if (scenario === 0) {
+                const bus = document.createElement('div');
+                bus.className = 'vehicle bus main-north';
+                bus.style.left = '49%';
+                bus.style.top = '25%';
+                bus.dataset.type = 'main';
+                container.appendChild(bus);
+                addLog(`[车辆检测] 检测到公交车到达，给予信号优先`);
+            }
+        }
+        
+        function setTrafficLights(pattern) {
+            const lights = ['north', 'south', 'west', 'east'];
+            
+            lights.forEach(dir => {
+                const light = document.getElementById(`light-${dir}`);
+                const red = light.querySelector('.light.red');
+                const yellow = light.querySelector('.light.yellow');
+                const green = light.querySelector('.light.green');
+                
+                // 重置所有灯
+                red.classList.remove('active');
+                yellow.classList.remove('active');
+                green.classList.remove('active');
+                
+                if (pattern === 'main-green-extended') {
+                    // 场景1：主干道绿灯延长至60秒，支路红灯
+                    if (dir === 'north' || dir === 'south') {
+                        green.classList.add('active');
+                    } else {
+                        red.classList.add('active');
+                    }
+                } else if (pattern === 'all-red-pedestrian') {
+                    // 场景2：所有车辆红灯，行人绿灯
+                    red.classList.add('active');
+                } else if (pattern === 'all-green-wave') {
+                    // 场景3：全线绿灯形成绿波带
+                    green.classList.add('active');
+                } else if (pattern === 'all-red-emergency') {
+                    // 场景4：全红灯应急响应
+                    red.classList.add('active');
+                } else if (pattern === 'detour-mode') {
+                    // 场景5：绕行模式，主干道绿灯，支路红灯
+                    if (dir === 'north' || dir === 'south') {
+                        green.classList.add('active');
+                    } else {
+                        red.classList.add('active');
+                    }
+                }
+            });
+        }
+        
+        function startOptimization() {
+            if (isProcessing) return;
+            isProcessing = true;
+            
+            document.getElementById('optimize-btn').disabled = true;
+            
+            const s = scenarios[currentScenario];
+            document.getElementById('system-status').textContent = '⚙️ 正在优化...';
+            document.getElementById('system-status').className = 'status-value warning';
+            
+            addLog(`[AI检测] 识别场景：${s.name}`);
+            addLog(`[压力计算] Pressure = ${s.pressure}`);
+            addLog(`[决策引擎] 执行策略：${s.action}`);
+            
+            // 创建车辆
+            createVehicles(currentScenario);
+            
+            // 设置信号灯状态
+            setTrafficLights(s.lightPattern);
+            
+            // 特殊场景处理
+            if (currentScenario === 1) {
+                // 行人过街
+                document.querySelectorAll('.pedestrian').forEach(p => p.style.display = 'block');
+                addLog(`[行人检测] 检测到6名行人等待过街`);
+                addLog(`[信号控制] 切换行人绿灯，时长15秒`);
+            }
+            
+            if (currentScenario === 2) {
+                // 应急车辆
+                const emergency = document.createElement('div');
+                emergency.className = 'vehicle emergency';
+                emergency.style.left = '48%';
+                emergency.style.top = '50%';
+                emergency.style.transform = 'rotate(90deg)';
+                emergency.style.width = '35px';
+                emergency.style.height = '18px';
+                emergency.style.display = 'flex';
+                emergency.style.alignItems = 'center';
+                emergency.style.justifyContent = 'center';
+                emergency.innerHTML = '🚑';
+                emergency.style.fontSize = '14px';
+                document.getElementById('vehicles').appendChild(emergency);
+                addLog(`[V2X通信] 接收到救护车优先通行请求`);
+                addLog(`[绿波带] 沿线信号灯全部切换为绿灯`);
+            }
+            
+            if (currentScenario === 3) {
+                // 事故响应
+                document.getElementById('accident-car-1').style.display = 'block';
+                document.getElementById('accident-car-2').style.display = 'block';
+                addLog(`[事故检测] 路口中央检测到交通事故`);
+                addLog(`[应急响应] 全红灯激活，2分钟响应时间`);
+                addLog(`[通知] 已通知交警部门`);
+            }
+            
+            if (currentScenario === 4) {
+                // 施工区域
+                document.getElementById('construction').style.display = 'block';
+                addLog(`[施工检测] 路口东北侧施工区域激活`);
+                addLog(`[绕行引导] 调整相位序列，引导车辆绕行`);
+            }
+            
+            // 动画进度
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 2;
+                document.getElementById('progress-fill').style.width = `${progress}%`;
+                
+                // 车辆移动动画
+                if (progress % 10 === 0 && progress < 90) {
+                    const vehicles = document.querySelectorAll('#vehicles .vehicle');
+                    vehicles.forEach((v, i) => {
+                        if (!v.classList.contains('accident-vehicle') && !v.classList.contains('emergency')) {
+                            if (v.dataset.type === 'main') {
+                                const newY = parseFloat(v.dataset.initialTop) + progress * 0.8;
+                                v.style.top = `${Math.min(newY, 95)}%`;
+                            } else {
+                                const newX = parseFloat(v.dataset.initialLeft) + progress * 0.6;
+                                v.style.left = `${Math.min(newX, 95)}%`;
+                            }
+                            
+                            if (progress > 70) {
+                                v.style.opacity = '0.3';
+                            }
+                        }
+                    });
+                }
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    completeOptimization();
+                }
+            }, 100);
+        }
+        
+        function completeOptimization() {
+            const s = scenarios[currentScenario];
+            
+            document.getElementById('trad-wait').innerHTML = `${s.tradWait}<span class="comparison-unit">秒</span>`;
+            document.getElementById('smart-wait').innerHTML = `${s.smartWait}<span class="comparison-unit">秒</span>`;
+            document.getElementById('trad-queue').innerHTML = `${s.tradQueue}<span class="comparison-unit">辆</span>`;
+            document.getElementById('smart-queue').innerHTML = `${s.smartQueue}<span class="comparison-unit">辆</span>`;
+            
+            const waitImprovement = ((s.tradWait - s.smartWait) / s.tradWait * 100).toFixed(1);
+            const queueImprovement = ((s.tradQueue - s.smartQueue) / s.tradQueue * 100).toFixed(1);
+            
+            document.getElementById('improvement').textContent = 
+                `📈 通行效率提升 ${waitImprovement}% | 等待时间减少 ${queueImprovement}%`;
+            
+            document.getElementById('system-status').textContent = '✅ 优化完成';
+            document.getElementById('system-status').className = 'status-value success';
+            
+            addLog(`[优化完成] 等待时间：${s.tradWait}s → ${s.smartWait}s`);
+            addLog(`[效果评估] 排队长度减少：${queueImprovement}%`);
+            addLog(`[性能提升] 通行效率提升 +${waitImprovement}%`);
+            
+            isProcessing = false;
+            document.getElementById('optimize-btn').disabled = false;
+        }
+        
+        function resetScenario() {
+            if (isProcessing) return;
+            
+            document.getElementById('progress-fill').style.width = '0%';
+            document.getElementById('vehicles').innerHTML = '';
+            document.getElementById('construction').style.display = 'none';
+            document.querySelectorAll('.pedestrian').forEach(p => p.style.display = 'none');
+            document.getElementById('accident-car-1').style.display = 'none';
+            document.getElementById('accident-car-2').style.display = 'none';
+            document.getElementById('log-console').innerHTML = '<div class="log-entry">[系统就绪] 场景已重置，点击"启动智能优化"开始演示</div>';
+            document.getElementById('optimize-btn').disabled = false;
+            
+            // 重置信号灯
+            setTrafficLights('all-red-pedestrian');
+            
+            updateStatus();
+        }
+        
+        // 初始化
+        updateStatus();
+        resetScenario();
+    </script>
+</body>
+</html>
