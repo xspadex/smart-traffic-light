@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>鸿蒙智慧交通控制系统 | HarmonyOS Smart Traffic</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <script src="vendor/leaflet/leaflet.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
@@ -136,7 +138,13 @@
             box-shadow: 0 0 20px rgba(0,0,0,0.5);
         }
         .video-feed {
-            width: 100%; height: 100%; object-fit: cover;
+            width: 100%; height: 100%; object-fit: contain;
+        }
+        #roi-persistent-layer,
+        #yolo-boxes {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
         }
         /* 视频标题叠加 */
         .video-title-overlay {
@@ -201,9 +209,6 @@
         /* bus: 蓝色 */
         .yolo-box.cls-bus .yolo-rect { border-color: #3b82f6; }
         .yolo-box.cls-bus .yolo-label { background: #3b82f6; color: #fff; }
-        /* person: 红色 */
-        .yolo-box.cls-person .yolo-rect { border-color: #ef4444; }
-        .yolo-box.cls-person .yolo-label { background: #ef4444; color: #fff; }
         @keyframes yoloFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* 板端信息叠加 (左上角第一行) */
@@ -238,7 +243,10 @@
         }
         /* 已确认的 ROI 区域(持久) — 放在 yolo-boxes 之外 */
         .roi-persistent {
-            position: absolute; z-index: 4; pointer-events: none;
+            position: absolute; z-index: 4; pointer-events: auto; cursor: pointer;
+        }
+        .roi-persistent.selected .roi-border {
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 0 18px rgba(0,212,255,0.55);
         }
         .roi-persistent .roi-border {
             width: 100%; height: 100%; border: 2.5px solid #f5e642; box-sizing: border-box;
@@ -257,6 +265,36 @@
             border-radius: 0 0 0 4px;
         }
         .roi-persistent .roi-delete:hover { background: #ff4d4f; }
+        .region-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .region-detail-item {
+            background: #0f1623;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 6px;
+            padding: 9px;
+        }
+        .region-detail-label {
+            color: #728099;
+            font-size: 10px;
+            margin-bottom: 4px;
+        }
+        .region-detail-value {
+            color: #fff;
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'Consolas', monospace;
+        }
+        .region-mix-row {
+            display: flex;
+            justify-content: space-between;
+            color: #a0aec0;
+            font-size: 11px;
+            padding: 3px 0;
+        }
         /* AI 统计叠加层 */
         .ai-stats {
             position: absolute; top: 10px; right: 10px;
@@ -304,11 +342,173 @@
         }
         @keyframes flow { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
 
-        /* 信号灯栏 - 四方向 + 倒计时圆环 */
+        /* 信号灯栏 - 信号矩阵 + 相位控制 */
         .signal-bar {
-            grid-column: 1 / -1; display: flex; justify-content: space-around; align-items: center;
-            background: var(--bg-panel); padding: 18px 20px; border-radius: 8px;
-            border: 1px solid #333; margin-top: 15px; gap: 10px;
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: minmax(520px, 1.1fr) minmax(420px, 1fr);
+            gap: 16px;
+            background: transparent;
+            padding: 0;
+            border: 0;
+            margin-top: 15px;
+        }
+        .signal-matrix-card,
+        .phase-panel-card {
+            background: rgba(13, 35, 56, 0.96);
+            border: 1px solid rgba(0, 212, 255, 0.22);
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 10px 28px rgba(0,0,0,0.28);
+        }
+        .signal-panel-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #dce7f7;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .signal-panel-sub {
+            font-size: 10px;
+            color: #7f95ad;
+            font-family: 'Consolas', monospace;
+            font-weight: 400;
+        }
+        .signal-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 11px;
+            overflow: hidden;
+            border-radius: 6px;
+        }
+        .signal-matrix th,
+        .signal-matrix td {
+            padding: 8px 7px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.07);
+            background: rgba(3, 16, 29, 0.58);
+        }
+        .signal-matrix th {
+            color: #dce7f7;
+            font-size: 10px;
+            font-weight: 700;
+            background: rgba(4, 26, 44, 0.86);
+        }
+        .signal-matrix th:first-child,
+        .signal-matrix td:first-child {
+            width: 54px;
+            color: #dce7f7;
+            font-weight: 700;
+            background: rgba(4, 32, 53, 0.96);
+        }
+        .matrix-cell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            min-width: 50px;
+            font-family: 'Consolas', monospace;
+            color: #dce7f7;
+        }
+        .matrix-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            background: #64748b;
+            box-shadow: 0 0 8px rgba(100,116,139,0.55);
+        }
+        .matrix-dot.green { background: var(--success); box-shadow: 0 0 10px rgba(82,196,26,0.9); }
+        .matrix-dot.yellow { background: var(--warning); box-shadow: 0 0 10px rgba(250,173,20,0.9); }
+        .matrix-dot.red { background: var(--danger); box-shadow: 0 0 10px rgba(255,77,79,0.85); }
+        .matrix-dot.off { background: #64748b; box-shadow: none; opacity: 0.65; }
+        .matrix-time.muted { color: #94a3b8; }
+        .camera-tabs {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(96px, 1fr));
+            gap: 10px;
+            max-width: 760px;
+            margin: 0 auto 12px;
+        }
+        .phase-toolbar {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .phase-tab,
+        .phase-mode,
+        .phase-action {
+            border: 0;
+            border-radius: 5px;
+            color: #dce7f7;
+            background: rgba(0,120,212,0.4);
+            padding: 7px 8px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .phase-tab.active,
+        .phase-mode.active {
+            background: #0f6db8;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.24), 0 0 14px rgba(0,212,255,0.28);
+        }
+        .phase-mode-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .phase-mode.manual { background: #475569; }
+        .phase-mode.emergency { background: #8f1d2c; }
+        .phase-mode.manual.active { background: #64748b; }
+        .phase-mode.emergency.active { background: #b91c1c; }
+        .phase-panel-heading {
+            font-size: 12px;
+            color: #dce7f7;
+            font-weight: 700;
+            margin-bottom: 7px;
+        }
+        .phase-row {
+            display: grid;
+            grid-template-columns: 82px 1fr 38px;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: #dce7f7;
+            margin: 5px 0;
+        }
+        .phase-row input[type="range"] {
+            height: 4px;
+            background: linear-gradient(90deg, #00d4ff, #1d4ed8);
+        }
+        .phase-row input[type="range"]:disabled {
+            opacity: 0.35;
+        }
+        .phase-value {
+            text-align: right;
+            font-family: 'Consolas', monospace;
+            color: #dce7f7;
+        }
+        .phase-actions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .phase-action.all-red { background: var(--danger); }
+        .phase-action.release { background: #64748b; }
+        .phase-action.resume { background: var(--primary); }
+        .phase-softbus {
+            text-align: right;
+            color: #8aa0bb;
+            font-size: 10px;
+            margin-top: 8px;
+            font-family: 'Consolas', monospace;
         }
         .traffic-light-group { text-align: center; display: flex; flex-direction: column; align-items: center; }
         .traffic-light-group .tl-label { font-size: 11px; color: #888; margin-bottom: 6px; letter-spacing: 0.5px; }
@@ -440,6 +640,47 @@
         .dashboard-grid {
             display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 25px;
         }
+        .dashboard-timebar {
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+            padding: 16px 18px; margin-bottom: 20px;
+        }
+        .timebar-top {
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 18px;
+            margin-bottom: 14px;
+        }
+        .timebar-title { font-size: 13px; color: var(--text-sub); margin-bottom: 5px; }
+        .timebar-window { font-size: 16px; color: var(--text-main); font-weight: 600; }
+        .time-filter-grid {
+            display: grid;
+            grid-template-columns: minmax(210px, 1fr) minmax(210px, 1fr) 150px auto;
+            gap: 12px;
+            align-items: end;
+        }
+        .time-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            color: var(--text-sub);
+            font-size: 11px;
+        }
+        .time-input {
+            height: 38px;
+            background: #0f1623;
+            border: 1px solid #263244;
+            border-radius: 6px;
+            color: var(--text-main);
+            padding: 0 10px;
+            font-family: 'Consolas', monospace;
+            outline: none;
+        }
+        .time-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.14);
+        }
+        .timeline-hint {
+            margin-top: 8px; display: flex; justify-content: space-between; gap: 12px;
+            color: #6b7280; font-size: 11px;
+        }
         .chart-container { position: relative; height: 320px; }
         .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .data-table th, .data-table td {
@@ -473,7 +714,7 @@
         .map-view {
             background: #1a2639; position: relative;
             border-radius: 8px; overflow: hidden;
-            perspective: 1000px;
+            perspective: none;
             border: 1px solid #333;
         }
         .map-plane {
@@ -503,7 +744,7 @@
             z-index: 10;
         }
         .car.vertical { transform: rotate(90deg); }
-        .sim-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .sim-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 15px; }
         .btn {
             padding: 8px 16px; background: var(--primary);
             border: none; color: white; border-radius: 4px; cursor: pointer;
@@ -513,6 +754,18 @@
         .btn.secondary { background: #333; }
         .btn.danger { background: var(--danger); }
         .btn.export { background: var(--success); }
+        .btn.active { background: var(--success); color: #fff; }
+        .map-name-input {
+            width: 170px;
+            padding: 8px 10px;
+            background: #0f1623;
+            border: 1px solid #333;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            outline: none;
+        }
+        .map-name-input:focus { border-color: var(--accent); }
 
         /* 5. 场景演示 */
         .scenario-cards {
@@ -787,6 +1040,222 @@
         }
 
         /* === SUMO 仿真增强 === */
+        #sumo-leaflet-map {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: #dfe7ec;
+        }
+        #sumo-leaflet-map .leaflet-tile {
+            filter: saturate(0.95) contrast(1.02);
+        }
+        #sumo-leaflet-map .leaflet-control-attribution {
+            background: rgba(255,255,255,0.82);
+            color: #4a5568;
+            font-size: 9px;
+        }
+        #sumo-leaflet-map .leaflet-control-zoom a {
+            background: rgba(255,255,255,0.92);
+            color: #1f2937;
+            border-bottom-color: rgba(0,0,0,0.08);
+        }
+        .map-fallback {
+            position: absolute;
+            inset: 0;
+            display: none;
+            z-index: 2;
+            align-items: center;
+            justify-content: center;
+            background: #101826;
+            color: #a0aec0;
+            font-size: 13px;
+        }
+        .tls-marker {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.92);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-family: 'Consolas', monospace;
+            font-size: 10px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .tls-marker::after {
+            content: '';
+            position: absolute;
+            inset: -7px;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            opacity: 0.18;
+        }
+        .tls-marker.low { background: #52c41a; color: #52c41a; }
+        .tls-marker.medium { background: #faad14; color: #faad14; }
+        .tls-marker.high { background: #ff4d4f; color: #ff4d4f; }
+        .tls-marker.node { background: #00d4ff; color: #00d4ff; }
+        .tls-marker.manual {
+            background: #8a94a6;
+            color: #8a94a6;
+            border-color: rgba(255,255,255,0.95);
+        }
+        .manual-badge {
+            position: absolute;
+            right: -8px;
+            top: -9px;
+            width: 17px;
+            height: 17px;
+            border-radius: 50%;
+            background: #f8fafc;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            z-index: 2;
+        }
+        .tls-marker span {
+            color: #fff;
+            position: relative;
+            z-index: 1;
+        }
+        .vehicle-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00d4ff;
+            border: 1px solid rgba(255,255,255,0.85);
+            box-shadow: 0 0 10px rgba(0,212,255,0.7);
+        }
+        .status-bars {
+            display: grid;
+            gap: 7px;
+            margin-top: 10px;
+        }
+        .status-bar-row {
+            display: grid;
+            grid-template-columns: 92px 1fr;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: #dce7f7;
+        }
+        .status-bar-track {
+            height: 12px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .status-bar-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.25s ease, background 0.25s ease;
+        }
+        .status-bar-fill.high { background: #ff4d4f; }
+        .status-bar-fill.medium { background: #faad14; }
+        .status-bar-fill.low { background: #52c41a; }
+        .health-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            color: #dce7f7;
+            font-size: 13px;
+        }
+        .health-row strong { font-family: 'Consolas', monospace; font-size: 17px; }
+        .manual-list {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            font-size: 11px;
+            color: #a0aec0;
+            line-height: 1.5;
+        }
+        #sumo-svg {
+            background:
+                linear-gradient(135deg, rgba(0,0,0,0.18) 0%, rgba(255,255,255,0.03) 100%),
+                #101826;
+        }
+        .map-block {
+            fill: #162237;
+            stroke: rgba(255,255,255,0.05);
+            stroke-width: 1;
+        }
+        .map-green {
+            fill: rgba(82,196,26,0.08);
+            stroke: rgba(82,196,26,0.2);
+            stroke-width: 1;
+        }
+        .map-water {
+            fill: none;
+            stroke: rgba(0,212,255,0.22);
+            stroke-width: 18;
+            stroke-linecap: round;
+        }
+        .map-road {
+            fill: none;
+            stroke: #303d52;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .map-road.main { stroke-width: 22; }
+        .map-road.secondary { stroke-width: 14; }
+        .map-road.local { stroke-width: 9; stroke: #273246; }
+        .map-road-lane {
+            fill: none;
+            stroke: rgba(255,255,255,0.24);
+            stroke-width: 1.2;
+            stroke-dasharray: 12 12;
+            stroke-linecap: round;
+        }
+        .pressure-link {
+            fill: none;
+            stroke-linecap: round;
+            opacity: 0.72;
+            transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
+        }
+        .junction-hit {
+            cursor: pointer;
+            pointer-events: all;
+        }
+        .junction-ring {
+            fill: rgba(11,17,32,0.88);
+            stroke: #00ff9d;
+            stroke-width: 2;
+            transition: fill 0.2s, stroke 0.2s, r 0.2s;
+        }
+        .junction-dot {
+            fill: #00ff9d;
+            filter: url(#nodeGlow);
+        }
+        .junction-label {
+            fill: #dce7f7;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'Consolas', monospace;
+            pointer-events: none;
+        }
+        .junction-sub {
+            fill: #8aa0bb;
+            font-size: 8px;
+            font-family: 'Consolas', monospace;
+            pointer-events: none;
+        }
+        .junction-node:hover .junction-ring {
+            fill: rgba(0,255,157,0.16);
+            stroke: #ffffff;
+            r: 13;
+        }
+        .map-label {
+            fill: rgba(220,231,247,0.36);
+            font-size: 10px;
+            font-family: 'Consolas', monospace;
+            letter-spacing: 0;
+        }
         .sumo-legend {
             position: absolute; bottom: 10px; left: 10px;
             background: rgba(0,0,0,0.75); padding: 8px 12px;
@@ -822,9 +1291,15 @@
         }
         @media (max-width: 1200px) {
             .monitor-grid { grid-template-columns: 1fr; }
+            .signal-bar { grid-template-columns: 1fr; }
             .control-grid { grid-template-columns: 1fr; }
             .config-grid { grid-template-columns: 1fr; }
             .v2x-grid { grid-template-columns: 1fr; }
+            .time-filter-grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            .time-filter-grid { grid-template-columns: 1fr; }
+            .timebar-top { flex-direction: column; }
         }
     </style>
 </head>
@@ -860,7 +1335,10 @@
             <i class="fas fa-infinity"></i> Harmony Traffic
         </div>
         <div class="nav-items">
-            <div class="nav-item active" onclick="showPage('monitor', this)">
+            <div class="nav-item active" onclick="showPage('sumo', this)">
+                <i class="fas fa-road"></i> 实时路网监控
+            </div>
+            <div class="nav-item" onclick="showPage('monitor', this)">
                 <i class="fas fa-video"></i> 监控主界面
             </div>
             <div class="nav-item" onclick="showPage('control', this)">
@@ -868,9 +1346,6 @@
             </div>
             <div class="nav-item" onclick="showPage('dashboard', this)">
                 <i class="fas fa-chart-line"></i> 数据看板
-            </div>
-            <div class="nav-item" onclick="showPage('sumo', this)">
-                <i class="fas fa-road"></i> SUMO 仿真
             </div>
             <div class="nav-item" onclick="showPage('scenario', this)">
                 <i class="fas fa-play-circle"></i> 场景演示
@@ -909,13 +1384,16 @@
     <div class="main-content">
         
         <!-- 1. 监控主界面 -->
-        <div id="monitor" class="page active">
+        <div id="monitor" class="page">
             <div class="header">
                 <h2>实时监控主界面 <span class="badge ok">Live</span></h2>
-                <div>
-                    <span class="badge ok">GB/T 28181</span>
-                    <span class="badge ok">GA/T 497</span>
-                </div>
+            </div>
+            <div class="camera-tabs">
+                <button class="phase-tab active" data-dir="North" onclick="setPhaseDirection('North')">North ↑</button>
+                <button class="phase-tab" data-dir="South" onclick="setPhaseDirection('South')">South ↓</button>
+                <button class="phase-tab" data-dir="East" onclick="setPhaseDirection('East')">East →</button>
+                <button class="phase-tab" data-dir="West" onclick="setPhaseDirection('West')">West ←</button>
+                <button class="phase-tab" data-dir="Panorama" onclick="setPhaseDirection('Panorama')">Panorama</button>
             </div>
             <!-- ROI 工具栏 -->
             <div class="roi-toolbar">
@@ -945,7 +1423,7 @@
                     <div id="yolo-boxes"></div>
                     <!-- AI 统计叠加 (右上) -->
                     <div class="ai-stats">
-                        <div><span class="label">Model:</span> YOLOv8n (INT8)</div>
+                        <div><span class="label">Model:</span> <span id="ai-model-name">YOLOv8n (Local)</span></div>
                         <div><span class="label">NPU:</span> <span id="npu-load">45%</span> <span class="label">| 0.8 TOPS</span></div>
                         <div><span class="label">Infer:</span> <span id="ai-infer-ms">32</span>ms (<span id="ai-fps">31</span> FPS)</div>
                         <div><span class="label">Mem:</span> <span id="ai-mem">128</span> MB</div>
@@ -954,24 +1432,38 @@
                     <div class="detection-summary">
                         <div class="det-item"><div class="det-dot v"></div> Car <strong id="det-car">0</strong></div>
                         <div class="det-item"><div class="det-dot b"></div> Bus <strong id="det-bus">0</strong></div>
-                        <div class="det-item"><div class="det-dot p"></div> Person <strong id="det-person">0</strong></div>
+                        <div class="det-item"><div class="det-dot v"></div> Truck <strong id="det-truck">0</strong></div>
                     </div>
                 </div>
                 <div class="monitor-side">
                     <!-- 实时交通数据 -->
                     <div class="card">
-                        <div class="card-title">实时交通数据</div>
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: var(--text-sub); font-size: 12px;">Vehicles Detected</div>
-                            <div class="card-value" style="color: var(--accent);"><span id="live-flow">0</span></div>
+                        <div class="card-title">
+                            区域详细数据看板
+                            <span id="monitor-region-name" style="color: var(--accent); font-size: 11px;">全局</span>
                         </div>
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: var(--text-sub); font-size: 12px;">Queue Length</div>
-                            <div class="card-value"><span id="live-queue">0</span> <span style="font-size:14px;">m</span></div>
+                        <div class="region-detail-grid">
+                            <div class="region-detail-item">
+                                <div class="region-detail-label">Vehicles</div>
+                                <div class="region-detail-value" style="color: var(--accent);" id="region-veh">0</div>
+                            </div>
+                            <div class="region-detail-item">
+                                <div class="region-detail-label">Queue</div>
+                                <div class="region-detail-value"><span id="region-queue">0</span><span style="font-size:11px;">m</span></div>
+                            </div>
+                            <div class="region-detail-item">
+                                <div class="region-detail-label">Avg Wait</div>
+                                <div class="region-detail-value" style="color: var(--warning);"><span id="region-wait">0.0</span><span style="font-size:11px;">s</span></div>
+                            </div>
+                            <div class="region-detail-item">
+                                <div class="region-detail-label">Pressure</div>
+                                <div class="region-detail-value" id="region-pressure" style="color: var(--success);">0.30</div>
+                            </div>
                         </div>
-                        <div>
-                            <div style="color: var(--text-sub); font-size: 12px;">Avg. Waiting Time</div>
-                            <div class="card-value" style="color: var(--warning);"><span id="live-wait">0</span> <span style="font-size:14px;">s</span></div>
+                        <div style="background:#0b1120; border-radius: 6px; padding: 8px; margin-bottom: 10px;">
+                            <div class="region-mix-row"><span>Car</span><strong id="region-car">0</strong></div>
+                            <div class="region-mix-row"><span>Bus</span><strong id="region-bus">0</strong></div>
+                            <div class="region-mix-row"><span>Truck</span><strong id="region-truck">0</strong></div>
                         </div>
                     </div>
 
@@ -1082,83 +1574,75 @@
                         Distributed SoftBus <span style="color: var(--success);">Connected</span> | Latency 12ms
                     </div>
                 </div>
-                <!-- 信号灯栏：四方向竖排灯 + 圆环倒计时 + FSM 状态 -->
+                <!-- 信号灯栏：方向相位矩阵 + 控制面板 -->
                 <div class="signal-bar">
-                    <!-- 南北方向 -->
-                    <div class="traffic-light-group">
-                        <div class="tl-label">NS (主干道)</div>
-                        <div class="traffic-light-vertical" id="tl-ns">
-                            <div class="light-v red on"></div>
-                            <div class="light-v yellow"></div>
-                            <div class="light-v green"></div>
+                    <div class="signal-matrix-card">
+                        <div class="signal-panel-title">
+                            <span>Signal Status Matrix</span>
+                            <span class="signal-panel-sub">Direction x Phase</span>
                         </div>
-                        <div class="countdown-ring">
-                            <svg viewBox="0 0 64 64" width="64" height="64">
-                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
-                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
-                                        stroke-linecap="round" id="cd-arc-ns" class="cd-arc"
-                                        stroke-dasharray="169.6" stroke-dashoffset="0"
-                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
-                            </svg>
-                            <div class="countdown-number" id="cd-ns">--</div>
-                        </div>
+                        <table class="signal-matrix">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>直行<br>(Straight)</th>
+                                    <th>左转<br>(Left)</th>
+                                    <th>右转<br>(Right)</th>
+                                    <th>掉头<br>(U-Turn)</th>
+                                    <th>行人<br>(Pedestrian)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="signal-matrix-body"></tbody>
+                        </table>
                     </div>
 
-                    <!-- FSM 状态中心区 -->
-                    <div class="fsm-indicator" style="flex-direction: column; gap: 8px; min-width: 140px;">
-                        <div style="text-align: center;">
-                            <div style="font-size: 10px; color: #666; margin-bottom: 3px;">FSM State</div>
-                            <div id="fsm-state-text" style="font-size: 16px; font-weight: bold; color: var(--danger); letter-spacing: 1px;">RED</div>
+                    <div class="phase-panel-card">
+                        <div class="signal-panel-title" style="margin-bottom: 6px;">
+                            <span>Phase Control Panel</span>
+                            <span class="fsm-state RED" id="phase-fsm-badge">RED</span>
                         </div>
-                        <div style="display: flex; gap: 12px; justify-content: center;">
-                            <div style="text-align: center;">
-                                <div style="font-size: 10px; color: #666;">Green Dur</div>
-                                <div id="fsm-green-dur" style="font-size: 14px; font-weight: bold; color: var(--accent);">--</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 10px; color: #666;">Vehicles</div>
-                                <div id="fsm-veh-count" style="font-size: 14px; font-weight: bold; color: var(--text-main);">0</div>
-                            </div>
+                        <div class="phase-mode-row">
+                            <button class="phase-mode active" data-mode="AI Auto" onclick="setMonitorControlMode('AI Auto')">AI Auto</button>
+                            <button class="phase-mode manual" data-mode="Manual" onclick="setMonitorControlMode('Manual')">Manual</button>
+                            <button class="phase-mode emergency" data-mode="Emergency" onclick="setMonitorControlMode('Emergency')">Emergency</button>
                         </div>
-                    </div>
-
-                    <!-- 东西方向 -->
-                    <div class="traffic-light-group">
-                        <div class="tl-label">EW (支路)</div>
-                        <div class="traffic-light-vertical" id="tl-ew">
-                            <div class="light-v red"></div>
-                            <div class="light-v yellow"></div>
-                            <div class="light-v green on"></div>
+                        <div class="phase-panel-heading"><span id="phase-dir-label">North</span> Phase Duration Control</div>
+                        <div class="phase-row">
+                            <span>Straight</span>
+                            <input type="range" min="5" max="60" value="28" id="phase-straight" disabled oninput="adjustMonitorPhase('straight', this.value)">
+                            <span class="phase-value" id="phase-straight-val">28s</span>
                         </div>
-                        <div class="countdown-ring">
-                            <svg viewBox="0 0 64 64" width="64" height="64">
-                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
-                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
-                                        stroke-linecap="round" id="cd-arc-ew" class="cd-arc"
-                                        stroke-dasharray="169.6" stroke-dashoffset="0"
-                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
-                            </svg>
-                            <div class="countdown-number" id="cd-ew">--</div>
+                        <div class="phase-row">
+                            <span>Left Turn</span>
+                            <input type="range" min="5" max="45" value="10" id="phase-left" disabled oninput="adjustMonitorPhase('left', this.value)">
+                            <span class="phase-value" id="phase-left-val">10s</span>
                         </div>
-                    </div>
-
-                    <!-- 行人信号 -->
-                    <div class="traffic-light-group">
-                        <div class="tl-label">Pedestrian</div>
-                        <div class="traffic-light-vertical" id="tl-ped">
-                            <div class="light-v red"></div>
-                            <div class="light-v yellow" style="visibility:hidden;"></div>
-                            <div class="light-v green on"></div>
+                        <div class="phase-row">
+                            <span>Right Turn</span>
+                            <input type="range" min="5" max="35" value="28" id="phase-right" disabled oninput="adjustMonitorPhase('right', this.value)">
+                            <span class="phase-value" id="phase-right-val">28s</span>
                         </div>
-                        <div class="countdown-ring">
-                            <svg viewBox="0 0 64 64" width="64" height="64">
-                                <circle cx="32" cy="32" r="27" fill="none" stroke="#333" stroke-width="4"/>
-                                <circle cx="32" cy="32" r="27" fill="none" stroke-width="4"
-                                        stroke-linecap="round" id="cd-arc-ped" class="cd-arc"
-                                        stroke-dasharray="169.6" stroke-dashoffset="0"
-                                        transform="rotate(-90 32 32)" style="transition: stroke-dashoffset 0.2s;"/>
-                            </svg>
-                            <div class="countdown-number" id="cd-ped">--</div>
+                        <div class="phase-row">
+                            <span>U-Turn</span>
+                            <input type="range" disabled value="0" id="phase-uturn">
+                            <span class="phase-value" id="phase-uturn-val">--</span>
+                        </div>
+                        <div class="phase-row">
+                            <span>Pedestrian</span>
+                            <input type="range" min="5" max="60" value="28" id="phase-pedestrian" disabled oninput="adjustMonitorPhase('pedestrian', this.value)">
+                            <span class="phase-value" id="phase-pedestrian-val">28s</span>
+                        </div>
+                        <div class="phase-actions">
+                            <button class="phase-action all-red" onclick="monitorAllRed()">All Red</button>
+                            <button class="phase-action release" onclick="monitorManualRelease()">Manual Release</button>
+                            <button class="phase-action resume" onclick="monitorResumeAI()">Resume AI</button>
+                        </div>
+                        <div class="phase-softbus">SoftBus: Connected + <span id="phase-latency">12</span>ms latency</div>
+                        <div class="fsm-reason" id="phase-fsm-reason" style="margin-top: 6px;">Waiting for detection...</div>
+                        <div style="display:none;">
+                            <span id="fsm-state-text">RED</span>
+                            <span id="fsm-green-dur">--</span>
+                            <span id="fsm-veh-count">0</span>
                         </div>
                     </div>
                 </div>
@@ -1227,10 +1711,42 @@
         <!-- 3. 数据看板 -->
         <div id="dashboard" class="page">
             <div class="header">
-                <h2>交通数据分析看板</h2>
+                <h2>交通数据分析看板 <span class="badge ok" id="dashboard-region-badge">全局</span></h2>
                 <div>
                     <button class="btn export" onclick="exportReport()"><i class="fas fa-file-export"></i> 导出报表</button>
                     <button class="btn" onclick="initCharts()"><i class="fas fa-sync"></i> 刷新</button>
+                </div>
+            </div>
+
+            <div class="dashboard-timebar">
+                <div class="timebar-top">
+                    <div>
+                        <div class="timebar-title">近 30 天 Mock 时间选择</div>
+                        <div class="timebar-window" id="dashboard-window-label">--</div>
+                    </div>
+                </div>
+                <div class="time-filter-grid">
+                    <label class="time-field">
+                        <span>起始日期时间</span>
+                        <input class="time-input" id="dashboard-start-time" type="datetime-local" onchange="setDashboardTimeRange()">
+                    </label>
+                    <label class="time-field">
+                        <span>终止日期时间</span>
+                        <input class="time-input" id="dashboard-end-time" type="datetime-local" onchange="setDashboardTimeRange()">
+                    </label>
+                    <label class="time-field">
+                        <span>统计粒度</span>
+                        <select class="time-input" id="dashboard-granularity-select" onchange="setDashboardGranularity(this.value)">
+                            <option value="month">按月</option>
+                            <option value="day" selected>按天</option>
+                            <option value="hour">按小时</option>
+                        </select>
+                    </label>
+                    <button class="btn secondary" onclick="resetDashboardTimeRange()">最近30天</button>
+                </div>
+                <div class="timeline-hint">
+                    <span id="dashboard-time-hint">选择起始和终止时间来生成 mock 数据窗口</span>
+                    <span id="dashboard-time-resolution">按天：逐日展示变化</span>
                 </div>
             </div>
             
@@ -1251,29 +1767,29 @@
             
             <div class="dashboard-grid">
                 <div class="card">
-                    <div class="card-title">Today's Traffic</div>
+                    <div class="card-title" id="dash-traffic-title">Window Traffic</div>
                     <div class="card-value" id="dash-traffic">12,458</div>
-                    <div class="card-sub" style="color: var(--success);">↑ 5.2% vs yesterday</div>
+                    <div class="card-sub" id="dash-traffic-sub" style="color: var(--success);">↑ 5.2% vs yesterday</div>
                 </div>
                 <div class="card">
                     <div class="card-title">Average Delay</div>
                     <div class="card-value" id="dash-delay">32.5s</div>
-                    <div class="card-sub" style="color: var(--success);">↓ 41.8% Reduction</div>
+                    <div class="card-sub" id="dash-delay-sub" style="color: var(--success);">↓ 41.8% Reduction</div>
                 </div>
                 <div class="card">
                     <div class="card-title">Congestion Index</div>
                     <div class="card-value" id="dash-congestion">0.68</div>
-                    <div class="card-sub" style="color: var(--warning);">Moderate</div>
+                    <div class="card-sub" id="dash-congestion-sub" style="color: var(--warning);">Moderate</div>
                 </div>
                 <div class="card">
                     <div class="card-title">Carbon Emission</div>
-                    <div class="card-value" style="color: var(--success);">-15.2%</div>
-                    <div class="card-sub">Improvement</div>
+                    <div class="card-value" id="dash-carbon" style="color: var(--success);">-15.2%</div>
+                    <div class="card-sub" id="dash-carbon-sub">Improvement</div>
                 </div>
             </div>
             <div class="control-grid" style="grid-template-columns: 2fr 1fr;">
                 <div class="card">
-                    <div class="card-title">24-Hour Traffic Flow Trend</div>
+                    <div class="card-title" id="dashboard-chart-title">24-Hour Traffic Flow Trend</div>
                     <div class="chart-container">
                         <canvas id="trafficChart"></canvas>
                     </div>
@@ -1303,13 +1819,38 @@
             </div>
         </div>
 
-        <!-- 4. SUMO 仿真 -->
-        <div id="sumo" class="page">
+        <!-- 4. 实时路网监控 -->
+        <div id="sumo" class="page active">
             <div class="header">
-                <h2>SUMO 交通仿真界面</h2>
+                <h2>实时路网监控</h2>
                 <div class="sim-controls">
                     <button class="btn" id="sumo-play-btn" onclick="toggleSim()"><i class="fas fa-play"></i> Start</button>
                     <button class="btn secondary" onclick="resetSumo()"><i class="fas fa-redo"></i> Reset</button>
+                    <button class="btn secondary" id="sumo-calibrate-btn" onclick="toggleMapCalibration()">
+                        <i class="fas fa-location-crosshairs"></i> Calibrate
+                    </button>
+                    <button class="btn secondary" id="sumo-line-btn" onclick="toggleLineEditMode()" disabled>
+                        <i class="fas fa-route"></i> Add Line
+                    </button>
+                    <button class="btn secondary" id="sumo-delete-line-btn" onclick="deleteSelectedMapLine()" disabled>
+                        <i class="fas fa-trash-alt"></i> Delete Line
+                    </button>
+                    <button class="btn secondary" id="sumo-area-btn" onclick="toggleStatsAreaMode()">
+                        <i class="fas fa-draw-polygon"></i> Draw Area
+                    </button>
+                    <button class="btn secondary" id="sumo-finish-area-btn" onclick="finishStatsArea()" disabled>
+                        <i class="fas fa-check"></i> Finish Area
+                    </button>
+                    <button class="btn secondary" id="sumo-clear-area-btn" onclick="clearStatsArea()">
+                        <i class="fas fa-eraser"></i> Clear Area
+                    </button>
+                    <input class="map-name-input" id="sumo-new-node-name" type="text" placeholder="路口名">
+                    <button class="btn secondary" id="sumo-add-node-btn" onclick="toggleAddIntersectionMode()">
+                        <i class="fas fa-map-pin"></i> Add 路口
+                    </button>
+                    <button class="btn secondary" id="sumo-save-map-btn" onclick="saveMapCalibration()">
+                        <i class="fas fa-floppy-disk"></i> Save Map
+                    </button>
                     <select class="btn secondary" id="sumo-speed-sel" style="background: #333; color: white; border: none;"
                             onchange="SUMO.speed = parseInt(this.value);">
                         <option value="1">Speed: 1x</option>
@@ -1320,65 +1861,50 @@
             </div>
             <div class="sumo-view">
                 <div class="map-view" id="sumo-map" style="position: relative;">
-                    <!-- 5 环放射状路网 SVG -->
-                    <svg id="sumo-svg" viewBox="0 0 600 600" width="100%" height="100%" style="background: #0f1623;">
-                        <defs>
-                            <linearGradient id="roadGrad"><stop offset="0%" stop-color="#2d3748"/><stop offset="100%" stop-color="#3d4f68"/></linearGradient>
-                            <filter id="carGlow"><feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                        </defs>
-                        <!-- 5 环环形路 -->
-                        <g id="sumo-rings">
-                            <circle cx="300" cy="300" r="60"  fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <circle cx="300" cy="300" r="110" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <circle cx="300" cy="300" r="160" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <circle cx="300" cy="300" r="210" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <circle cx="300" cy="300" r="260" fill="none" stroke="url(#roadGrad)" stroke-width="14"/>
-                        </g>
-                        <!-- 8 条放射路 (每 45°) -->
-                        <g id="sumo-radials">
-                            <line x1="300" y1="30"  x2="300" y2="570" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <line x1="30"  y1="300" x2="570" y2="300" stroke="url(#roadGrad)" stroke-width="14"/>
-                            <line x1="109" y1="109" x2="491" y2="491" stroke="url(#roadGrad)" stroke-width="12"/>
-                            <line x1="491" y1="109" x2="109" y2="491" stroke="url(#roadGrad)" stroke-width="12"/>
-                        </g>
-                        <!-- 40 个信号灯节点 (JS 生成) -->
-                        <g id="traffic-nodes"></g>
-                        <!-- 车辆容器 -->
-                        <g id="sumo-vehicles" filter="url(#carGlow)"></g>
-                        <!-- 事故标记容器 -->
-                        <g id="sumo-markers"></g>
-                        <!-- 中心标签 -->
-                        <text x="300" y="304" text-anchor="middle" fill="#00ff9d" font-size="9" opacity="0.5" font-family="Consolas">CENTER</text>
-                    </svg>
+                    <!-- Public map tiles + traffic simulation overlays -->
+                    <div id="sumo-leaflet-map"></div>
+                    <div class="map-fallback" id="sumo-map-fallback">本地地图瓦片加载失败，请检查 Demo/map-tiles 缓存</div>
                     <!-- 叠加层 -->
                     <div class="sumo-title-overlay">
-                        <i class="fas fa-road"></i> 5-Ring Spider Network | 40 TLS
+                        <i class="fas fa-map-location-dot"></i> Shanghai Lujiazui Public Map | 23 TLS
                     </div>
                     <div class="sumo-time">
                         <i class="fas fa-clock"></i> Step: <span id="sumo-step">0</span> / 800
                     </div>
                     <div class="sumo-legend">
-                        <div><span class="legend-dot" style="background: var(--success);"></span> Green</div>
-                        <div><span class="legend-dot" style="background: var(--danger);"></span> Red</div>
-                        <div><span class="legend-dot" style="background: #00ff9d;"></span> Ring Veh</div>
-                        <div><span class="legend-dot" style="background: #00d4ff;"></span> Radial Veh</div>
+                        <div><span class="legend-dot" style="background: var(--success);"></span> Low</div>
+                        <div><span class="legend-dot" style="background: var(--warning);"></span> Medium</div>
+                        <div><span class="legend-dot" style="background: var(--danger);"></span> High</div>
+                        <div><span class="legend-dot" style="background: #00d4ff;"></span> Click TLS</div>
                     </div>
                 </div>
                 <div style="overflow-y: auto;">
                     <div class="card">
-                        <div class="card-title">仿真状态</div>
+                        <div class="card-title">路网实时状态</div>
                         <div style="margin-bottom: 10px;">
                             <div style="font-size: 11px; color: #666;">Status</div>
                             <div id="sumo-status" style="font-size: 16px; font-weight: bold; color: var(--warning);">Ready</div>
+                            <div id="sumo-scope" style="font-size: 11px; color: var(--text-sub); margin-top: 3px;">Scope: 全路网</div>
                         </div>
+                        <button class="btn" style="width:100%; margin-bottom: 12px;" onclick="openRoadNetworkDashboard()">
+                            <i class="fas fa-chart-line"></i> 查看当前路网数据分析
+                        </button>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                            <div class="metric">
+                                <div class="metric-label">Intersections</div>
+                                <div class="metric-value" id="sumo-intersections-count">23</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Traffic Lights</div>
+                                <div class="metric-value" id="sumo-lights-count">92</div>
+                            </div>
                             <div class="metric">
                                 <div class="metric-label">Vehicles</div>
                                 <div class="metric-value" id="sumo-veh-count">50</div>
                             </div>
                             <div class="metric">
-                                <div class="metric-label">Traffic Lights</div>
-                                <div class="metric-value">40</div>
+                                <div class="metric-label">Real-time Flow</div>
+                                <div class="metric-value"><span id="sumo-flow">0</span> <span style="font-size:10px;">veh/min</span></div>
                             </div>
                             <div class="metric">
                                 <div class="metric-label">Avg Speed</div>
@@ -1388,6 +1914,26 @@
                                 <div class="metric-label">Stopped</div>
                                 <div class="metric-value" id="sumo-stopped" style="color: var(--danger);">0</div>
                             </div>
+                        </div>
+                        <div class="status-bars">
+                            <div class="status-bar-row">
+                                <span>Congested(<span id="sumo-congested-count">0</span>)</span>
+                                <div class="status-bar-track"><div class="status-bar-fill high" id="sumo-congested-bar"></div></div>
+                            </div>
+                            <div class="status-bar-row">
+                                <span>Busy(<span id="sumo-busy-count">0</span>)</span>
+                                <div class="status-bar-track"><div class="status-bar-fill medium" id="sumo-busy-bar"></div></div>
+                            </div>
+                            <div class="status-bar-row">
+                                <span>Normal(<span id="sumo-normal-count">0</span>)</span>
+                                <div class="status-bar-track"><div class="status-bar-fill low" id="sumo-normal-bar"></div></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 12px;">
+                            <div class="health-row"><span>Signal OK:</span><strong id="sumo-signal-ok">0</strong></div>
+                            <div class="health-row"><span>Manual Check:</span><strong id="sumo-manual-check">0</strong></div>
+                            <div class="health-row"><span>SoftBus Avg Latency:</span><strong><span id="sumo-softbus-latency">14</span>ms</strong></div>
+                            <div class="manual-list" id="sumo-manual-list">All intersections nominal</div>
                         </div>
                         <!-- 进度条 -->
                         <div style="margin-bottom: 12px;">
@@ -1640,8 +2186,8 @@
                         <h3>AI 视觉识别参数</h3>
                     </div>
                     <div class="config-item">
-                        <label><span>YOLO 置信度阈值 (Confidence)</span> <span id="conf-val">0.5</span></label>
-                        <input type="range" min="0.1" max="0.9" step="0.1" value="0.5" oninput="updateConfig('conf-val', this.value)">
+                        <label><span>YOLO 置信度阈值 (Confidence)</span> <span id="conf-val">0.25</span></label>
+                        <input type="range" min="0.1" max="0.9" step="0.05" value="0.25" oninput="updateConfig('conf-val', this.value)">
                     </div>
                     <div class="config-item">
                         <label><span>IoU 阈值 (Non-Max Suppression)</span> <span id="iou-val">0.45</span></label>
@@ -1788,14 +2334,10 @@
     <!-- 底部状态栏 -->
     <div class="footer-status">
         <div>
-            <span>System Status: </span>
-            <span style="color: var(--success);">Normal</span>
-            <span class="protocol-badge"><div class="dot"></div> GB/T 28181</span>
-            <span class="protocol-badge"><div class="dot"></div> GA/T 497</span>
             <span class="protocol-badge" style="border-color: var(--v2x-blue);"><div class="dot" style="background: var(--v2x-blue);"></div> C-V2X</span>
         </div>
         <div>
-            HarmonyOS Distributed SoftBus v3.0 | RK3568 Edge Gateway | SUMO 5-Ring Network Active
+            HarmonyOS Distributed SoftBus v3.0 | RK3568 Edge Gateway | Urban Arterial Network Active
         </div>
     </div>
 
@@ -1819,19 +2361,23 @@
             document.getElementById(pageId).classList.add('active');
             
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            element.classList.add('active');
+            if (element) element.classList.add('active');
 
             if(pageId === 'dashboard') initCharts();
+            if(pageId === 'sumo' && typeof SUMO !== 'undefined') SUMO.resizeMap();
         }
 
         // 控制面板滑块
         function updateSlider(id, val) {
+            if (!requireSignalControlAuth('调整信号相位时长')) return;
             document.getElementById(id).innerText = val + 's';
             addLog(`Phase duration adjusted to ${val}s`);
         }
 
         // 手动/自动切换
         function toggleMode(el) {
+            const nextIsAuto = !el.classList.contains('active');
+            if (!nextIsAuto && !requireSignalControlAuth('切换到 Manual 模式')) return;
             el.classList.toggle('active');
             const isAuto = el.classList.contains('active');
             document.getElementById('mode-text').innerText = isAuto ? 'Auto (AI)' : 'Manual';
@@ -1841,6 +2387,7 @@
 
         // 紧急预案
         function emergencyPlan() {
+            if (!requireSignalControlAuth('激活紧急预案 All Red')) return;
             addLog('⚠️ EMERGENCY PLAN ACTIVATED - All Red');
             document.querySelectorAll('.light, .light-v').forEach(l => l.classList.remove('on'));
             document.querySelectorAll('.light.red, .light-v.red').forEach(l => l.classList.add('on'));
@@ -1860,17 +2407,320 @@
 
         // 图表初始化
         let trafficChartInstance = null;
+        let dashboardGranularity = 'day';
+        let dashboardRangeStart = null;
+        let dashboardRangeEnd = null;
+        const DASHBOARD_MOCK_DAYS = 30;
+        const DASHBOARD_MOCK_NOW = new Date();
+        DASHBOARD_MOCK_NOW.setHours(23, 0, 0, 0);
+
+        function setDashboardText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function getDashboardRegion() {
+            if (typeof SUMO !== 'undefined' && SUMO && typeof SUMO.getDashboardScope === 'function') {
+                return SUMO.getDashboardScope();
+            }
+            return { name: '全路网', factor: 1, source: 'sumo' };
+        }
+
+        function getRegionMockFactor(region) {
+            if (!region) return { factor: 1, label: '全局' };
+            if (typeof region.factor === 'number') {
+                return { factor: Math.max(0.12, Math.min(1, region.factor)), label: region.name || '全路网' };
+            }
+            const area = Math.max(1, region.w * region.h);
+            const factor = Math.max(0.18, Math.min(0.72, area / 1800 + 0.12 + region.colorIdx * 0.04));
+            return { factor, label: region.name };
+        }
+
+        function formatDateLabel(date, withYear = false) {
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            if (!withYear) return `${month}-${day}`;
+            return `${date.getFullYear()}-${month}-${day}`;
+        }
+
+        function formatHourLabel(date) {
+            return `${formatDateLabel(date, true)} ${String(date.getHours()).padStart(2, '0')}:00`;
+        }
+
+        function addDays(date, days) {
+            const next = new Date(date);
+            next.setDate(next.getDate() + days);
+            return next;
+        }
+
+        function addHours(date, hours) {
+            const next = new Date(date);
+            next.setHours(next.getHours() + hours);
+            return next;
+        }
+
+        function getMockWindowStart() {
+            const start = new Date(DASHBOARD_MOCK_NOW);
+            start.setHours(0, 0, 0, 0);
+            start.setDate(start.getDate() - (DASHBOARD_MOCK_DAYS - 1));
+            return start;
+        }
+
+        function dailyTrafficValue(date) {
+            const dayIndex = Math.floor((date - getMockWindowStart()) / 86400000);
+            const weekday = date.getDay();
+            const workdayFactor = weekday === 0 || weekday === 6 ? 0.78 : 1;
+            const wave = 1 + Math.sin(dayIndex * 0.72) * 0.09 + Math.cos(dayIndex * 0.31) * 0.06;
+            return Math.round((9800 + dayIndex * 58) * workdayFactor * wave);
+        }
+
+        function hourlyTrafficValue(date) {
+            const hour = date.getHours();
+            const daily = dailyTrafficValue(date);
+            const morning = Math.exp(-Math.pow(hour - 8.3, 2) / 7.5);
+            const evening = Math.exp(-Math.pow(hour - 18.2, 2) / 9);
+            const midday = Math.exp(-Math.pow(hour - 13, 2) / 28) * 0.35;
+            const night = hour < 6 ? 0.14 : 0.26;
+            const share = night + morning * 1.2 + evening * 1.32 + midday;
+            return Math.round(daily * share / 15.8);
+        }
+
+        function fiveMinuteTrafficValue(date, slot) {
+            const hourBase = hourlyTrafficValue(date);
+            const localWave = 0.88 + Math.sin((date.getHours() * 12 + slot) * 0.9) * 0.08 + (slot % 3) * 0.035;
+            return Math.max(6, Math.round(hourBase / 12 * localWave));
+        }
+
+        function summarizeDashboardSeries(labels, flow, scopeLabel, region) {
+            const { factor, label } = getRegionMockFactor(region);
+            const scopedFlow = flow.map((v, i) => Math.max(1, Math.round(v * factor * (0.94 + (i % 4) * 0.025))));
+            const trafficTotal = scopedFlow.reduce((sum, v) => sum + v, 0);
+            const peak = Math.max(...scopedFlow);
+            const avg = trafficTotal / scopedFlow.length;
+            const congestion = Math.max(0.18, Math.min(0.96, avg / Math.max(peak, 1) * 0.68 + factor * 0.18));
+            const delay = 14 + congestion * 38 + factor * 8;
+            const carbon = -(7 + (1 - congestion) * 12 + factor * 2.5);
+            const trend = scopedFlow[scopedFlow.length - 1] - scopedFlow[0];
+            const trendPct = Math.abs(trend / Math.max(scopedFlow[0], 1) * 100).toFixed(1);
+            const congestionText = congestion > 0.75 ? 'Heavy' : congestion > 0.5 ? 'Moderate' : 'Smooth';
+            return {
+                labels,
+                flow: scopedFlow,
+                traffic: trafficTotal.toLocaleString(),
+                trafficSub: `${region ? `${label} | ` : ''}${scopeLabel} ${trend >= 0 ? '↑' : '↓'} ${trendPct}%`,
+                delay: delay.toFixed(1) + 's',
+                delaySub: `↓ ${(18 + (1 - congestion) * 28).toFixed(1)}% adaptive estimate`,
+                congestion: congestion.toFixed(2),
+                congestionSub: congestionText,
+                carbon: carbon.toFixed(1) + '%',
+                carbonSub: region ? `${label} estimate` : 'Mock emission improvement'
+            };
+        }
+
+        function getMockWindowEnd() {
+            return new Date(DASHBOARD_MOCK_NOW);
+        }
+
+        function toDateTimeInputValue(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hour = String(date.getHours()).padStart(2, '0');
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hour}:${minute}`;
+        }
+
+        function parseDateTimeInput(value) {
+            if (!value) return null;
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        function clampDashboardDate(date) {
+            const min = getMockWindowStart();
+            const max = getMockWindowEnd();
+            const time = Math.max(min.getTime(), Math.min(max.getTime(), date.getTime()));
+            return new Date(time);
+        }
+
+        function ensureDashboardRange() {
+            const min = getMockWindowStart();
+            const max = getMockWindowEnd();
+            if (!dashboardRangeStart || !dashboardRangeEnd) {
+                dashboardRangeStart = new Date(min);
+                dashboardRangeEnd = new Date(max);
+            }
+            dashboardRangeStart = clampDashboardDate(dashboardRangeStart);
+            dashboardRangeEnd = clampDashboardDate(dashboardRangeEnd);
+            if (dashboardRangeStart > dashboardRangeEnd) {
+                [dashboardRangeStart, dashboardRangeEnd] = [dashboardRangeEnd, dashboardRangeStart];
+            }
+            return {
+                startDate: new Date(dashboardRangeStart),
+                endDate: new Date(dashboardRangeEnd),
+                min,
+                max
+            };
+        }
+
+        function getDashboardSelectedRange() {
+            return ensureDashboardRange();
+        }
+
+        function buildDashboardMock(region) {
+            const range = getDashboardSelectedRange();
+            let labels = [];
+            let flow = [];
+            let scopeLabel = '';
+            let chartTitle = '';
+
+            if (dashboardGranularity === 'month') {
+                const startDay = new Date(range.startDate);
+                const endDay = new Date(range.endDate);
+                startDay.setHours(0, 0, 0, 0);
+                endDay.setHours(0, 0, 0, 0);
+                const dayCount = Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
+                const bucketSize = Math.max(1, Math.ceil(dayCount / 8));
+                for (let offset = 0; offset < dayCount; offset += bucketSize) {
+                    const bucketStart = addDays(startDay, offset);
+                    const bucketEnd = addDays(startDay, Math.min(dayCount - 1, offset + bucketSize - 1));
+                    let bucketTotal = 0;
+                    for (let dayOffset = offset; dayOffset <= Math.min(dayCount - 1, offset + bucketSize - 1); dayOffset++) {
+                        bucketTotal += dailyTrafficValue(addDays(startDay, dayOffset));
+                    }
+                    labels.push(bucketSize === 1 ? formatDateLabel(bucketStart) : `${formatDateLabel(bucketStart)}-${formatDateLabel(bucketEnd)}`);
+                    flow.push(bucketTotal);
+                }
+                scopeLabel = `${formatDateLabel(startDay, true)} - ${formatDateLabel(endDay, true)}`;
+                chartTitle = 'Monthly Traffic Flow Trend';
+            } else if (dashboardGranularity === 'day') {
+                const startDay = new Date(range.startDate);
+                const endDay = new Date(range.endDate);
+                startDay.setHours(0, 0, 0, 0);
+                endDay.setHours(0, 0, 0, 0);
+                const dayCount = Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
+                for (let i = 0; i < dayCount; i++) {
+                    const day = addDays(startDay, i);
+                    labels.push(formatDateLabel(day));
+                    flow.push(dailyTrafficValue(day));
+                }
+                scopeLabel = `${formatDateLabel(startDay, true)} - ${formatDateLabel(endDay, true)}`;
+                chartTitle = 'Daily Traffic Flow Trend';
+            } else {
+                const hourStart = new Date(range.startDate);
+                const hourEnd = new Date(range.endDate);
+                hourStart.setMinutes(0, 0, 0);
+                hourEnd.setMinutes(0, 0, 0);
+                const hourCount = Math.max(1, Math.round((hourEnd - hourStart) / 3600000) + 1);
+                for (let i = 0; i < hourCount; i++) {
+                    const hour = addHours(hourStart, i);
+                    const showDate = hourCount > 24 && (i === 0 || i === hourCount - 1 || i % Math.ceil(hourCount / 10) === 0);
+                    labels.push(showDate ? `${formatDateLabel(hour)} ${String(hour.getHours()).padStart(2, '0')}h` : `${String(hour.getHours()).padStart(2, '0')}h`);
+                    flow.push(hourlyTrafficValue(hour));
+                }
+                scopeLabel = `${formatHourLabel(hourStart)} - ${formatHourLabel(hourEnd)}`;
+                chartTitle = 'Hourly Traffic Flow Trend';
+            }
+
+            const data = summarizeDashboardSeries(labels, flow, scopeLabel, region);
+            data.scopeLabel = scopeLabel;
+            data.chartTitle = chartTitle;
+            return data;
+        }
+
+        function updateDashboardTimelineUI() {
+            const range = ensureDashboardRange();
+            const startInput = document.getElementById('dashboard-start-time');
+            const endInput = document.getElementById('dashboard-end-time');
+            const grainSelect = document.getElementById('dashboard-granularity-select');
+            const minValue = toDateTimeInputValue(range.min);
+            const maxValue = toDateTimeInputValue(range.max);
+            if (startInput) {
+                startInput.min = minValue;
+                startInput.max = maxValue;
+                startInput.value = toDateTimeInputValue(range.startDate);
+            }
+            if (endInput) {
+                endInput.min = minValue;
+                endInput.max = maxValue;
+                endInput.value = toDateTimeInputValue(range.endDate);
+            }
+            if (grainSelect) grainSelect.value = dashboardGranularity;
+            const labels = {
+                month: `按月 | ${formatDateLabel(range.startDate, true)} - ${formatDateLabel(range.endDate, true)}`,
+                day: `按天 | ${formatDateLabel(range.startDate, true)} - ${formatDateLabel(range.endDate, true)}`,
+                hour: `按小时 | ${formatHourLabel(range.startDate)} - ${formatHourLabel(range.endDate)}`
+            };
+            const hints = {
+                month: '按月：按选择范围聚合展示',
+                day: '按天：逐日展示变化',
+                hour: '按小时：逐小时展示变化'
+            };
+            setDashboardText('dashboard-window-label', labels[dashboardGranularity]);
+            setDashboardText('dashboard-time-resolution', hints[dashboardGranularity]);
+            setDashboardText('dashboard-time-hint', `Mock 数据范围：${formatDateLabel(range.min, true)} - ${formatDateLabel(range.max, true)}`);
+        }
+
+        function setDashboardGranularity(grain) {
+            dashboardGranularity = grain;
+            initCharts();
+        }
+
+        function setDashboardTimeRange() {
+            const startInput = document.getElementById('dashboard-start-time');
+            const endInput = document.getElementById('dashboard-end-time');
+            dashboardRangeStart = parseDateTimeInput(startInput?.value) || dashboardRangeStart;
+            dashboardRangeEnd = parseDateTimeInput(endInput?.value) || dashboardRangeEnd;
+            initCharts();
+        }
+
+        function resetDashboardTimeRange() {
+            dashboardRangeStart = getMockWindowStart();
+            dashboardRangeEnd = getMockWindowEnd();
+            initCharts();
+        }
+
+        function openRoadNetworkDashboard() {
+            const nav = document.querySelector(".nav-item[onclick*=\"showPage('dashboard'\"]");
+            showPage('dashboard', nav);
+            initCharts();
+            addLog(`[Dashboard] Opened analytics for ${getDashboardRegion()?.name || '全路网'}`);
+        }
+
         function initCharts() {
-            const ctx = document.getElementById('trafficChart').getContext('2d');
+            const canvas = document.getElementById('trafficChart');
+            if (!canvas) return;
+            const region = getDashboardRegion();
+            updateDashboardTimelineUI();
+            const data = buildDashboardMock(region);
+            setDashboardText('dashboard-region-badge', region ? region.name : '全局');
+            setDashboardText('dashboard-chart-title', data.chartTitle);
+            setDashboardText('dash-traffic-title', dashboardGranularity === 'month' ? '30-Day Traffic' :
+                dashboardGranularity === 'day' ? 'Daily Traffic' : 'Hourly Traffic');
+            setDashboardText('dash-traffic', data.traffic);
+            setDashboardText('dash-traffic-sub', data.trafficSub);
+            setDashboardText('dash-delay', data.delay);
+            setDashboardText('dash-delay-sub', data.delaySub);
+            setDashboardText('dash-congestion', data.congestion);
+            setDashboardText('dash-congestion-sub', data.congestionSub);
+            setDashboardText('dash-carbon', data.carbon);
+            setDashboardText('dash-carbon-sub', data.carbonSub);
+
+            const congestionSub = document.getElementById('dash-congestion-sub');
+            if (congestionSub) {
+                congestionSub.style.color = data.congestionSub === 'Heavy' ? 'var(--danger)' :
+                    data.congestionSub === 'Smooth' ? 'var(--success)' : 'var(--warning)';
+            }
+            const ctx = canvas.getContext('2d');
             if(trafficChartInstance) trafficChartInstance.destroy();
             
             trafficChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: ['0h', '4h', '8h', '12h', '16h', '20h', '24h'],
+                    labels: data.labels,
                     datasets: [{
                         label: 'Traffic Flow',
-                        data: [120, 50, 1500, 1200, 1400, 800, 200],
+                        data: data.flow,
                         borderColor: '#00ff9d',
                         backgroundColor: 'rgba(0, 255, 157, 0.1)',
                         fill: true,
@@ -1892,6 +2742,16 @@
         }
 
         // ============= 监控主界面核心引擎 =============
+        const DETECTION_CONFIG = {
+            mode: new URLSearchParams(window.location.search).get('detect') || localStorage.getItem('detectionMode') || 'local',
+            localEndpoint: new URLSearchParams(window.location.search).get('detectUrl') ||
+                (window.location.protocol === 'file:' ? 'http://127.0.0.1:5001/api/detections' : '/api/detections'),
+            edgeEndpoint: new URLSearchParams(window.location.search).get('edgeUrl') || ''
+        };
+        let _detectCanvas = null;
+        let _lastDetectionStats = null;
+        let _lastDetectionError = '';
+        let _detectInFlight = false;
 
         // --- FSM 信号控制器 (带完整红灯倒计时) ---
         const FSM = {
@@ -1969,10 +2829,256 @@
             }
         };
 
+        const SIGNAL_DIRECTIONS = ['North', 'South', 'East', 'West'];
+        const SIGNAL_PHASES = [
+            { key: 'straight', label: 'Straight' },
+            { key: 'left', label: 'Left' },
+            { key: 'right', label: 'Right' },
+            { key: 'uturn', label: 'U-Turn' },
+            { key: 'pedestrian', label: 'Pedestrian' }
+        ];
+        const SIGNAL_SCHEDULE = [
+            { id: 'NS_THROUGH', name: 'NS Straight + Right + Ped', duration: 28, group: 'NS', movement: 'through', state: 'green' },
+            { id: 'NS_THROUGH_YELLOW', name: 'NS Straight Clearance', duration: 3, group: 'NS', movement: 'through', state: 'yellow' },
+            { id: 'ALL_RED_1', name: 'All Red Clearance', duration: 2, group: 'ALL', movement: 'clearance', state: 'red' },
+            { id: 'NS_LEFT', name: 'NS Protected Left', duration: 10, group: 'NS', movement: 'left', state: 'green' },
+            { id: 'NS_LEFT_YELLOW', name: 'NS Left Clearance', duration: 3, group: 'NS', movement: 'left', state: 'yellow' },
+            { id: 'ALL_RED_2', name: 'All Red Clearance', duration: 2, group: 'ALL', movement: 'clearance', state: 'red' },
+            { id: 'EW_THROUGH', name: 'EW Straight + Right + Ped', duration: 24, group: 'EW', movement: 'through', state: 'green' },
+            { id: 'EW_THROUGH_YELLOW', name: 'EW Straight Clearance', duration: 3, group: 'EW', movement: 'through', state: 'yellow' },
+            { id: 'ALL_RED_3', name: 'All Red Clearance', duration: 2, group: 'ALL', movement: 'clearance', state: 'red' },
+            { id: 'EW_LEFT', name: 'EW Protected Left', duration: 10, group: 'EW', movement: 'left', state: 'green' },
+            { id: 'EW_LEFT_YELLOW', name: 'EW Left Clearance', duration: 3, group: 'EW', movement: 'left', state: 'yellow' },
+            { id: 'ALL_RED_4', name: 'All Red Clearance', duration: 2, group: 'ALL', movement: 'clearance', state: 'red' }
+        ];
+        const signalScheduleStart = Date.now();
+        let selectedPhaseDirection = 'North';
+        let monitorControlMode = 'AI Auto';
+        let monitorAllRedUntil = 0;
+        const SIGNAL_CONTROL_PASSWORD = '123456';
+        const SIGNAL_AUTH_TTL_MS = 5 * 60 * 1000;
+        let signalControlAuthUntil = 0;
+
+        function requireSignalControlAuth(actionName) {
+            if (Date.now() < signalControlAuthUntil) return true;
+            const input = window.prompt(`${actionName}\n请输入控制密码确认操作：`);
+            if (input === SIGNAL_CONTROL_PASSWORD) {
+                signalControlAuthUntil = Date.now() + SIGNAL_AUTH_TTL_MS;
+                addLog(`[Monitor] Manual control authorized for ${Math.round(SIGNAL_AUTH_TTL_MS / 60000)} minutes`);
+                return true;
+            }
+            if (input !== null) {
+                alert('密码错误，操作已取消');
+                addLog(`[Monitor] Manual control denied: invalid password for ${actionName}`);
+            } else {
+                addLog(`[Monitor] Manual control cancelled: ${actionName}`);
+            }
+            return false;
+        }
+
+        function getSignalCycleSeconds() {
+            return SIGNAL_SCHEDULE.reduce((sum, phase) => sum + phase.duration, 0);
+        }
+
+        function formatMatrixTime(seconds) {
+            if (seconds === null || seconds === undefined) return '--';
+            return '00:' + String(Math.max(0, Math.ceil(seconds))).padStart(2, '0');
+        }
+
+        function getDirectionGroup(dir) {
+            return (dir === 'North' || dir === 'South') ? 'NS' : 'EW';
+        }
+
+        function getScheduleSnapshot() {
+            const cycleSeconds = getSignalCycleSeconds();
+            const elapsed = ((Date.now() - signalScheduleStart) / 1000) % cycleSeconds;
+            let cursor = 0;
+            for (let i = 0; i < SIGNAL_SCHEDULE.length; i++) {
+                const phase = SIGNAL_SCHEDULE[i];
+                const next = cursor + phase.duration;
+                if (elapsed < next) {
+                    return {
+                        index: i,
+                        phase,
+                        elapsedInPhase: elapsed - cursor,
+                        remaining: next - elapsed,
+                        cycleElapsed: elapsed
+                    };
+                }
+                cursor = next;
+            }
+            return { index: 0, phase: SIGNAL_SCHEDULE[0], elapsedInPhase: 0, remaining: SIGNAL_SCHEDULE[0].duration, cycleElapsed: 0 };
+        }
+
+        function getSchedulePhase(group, movement) {
+            return SIGNAL_SCHEDULE.find(phase => phase.group === group && phase.movement === movement && phase.state === 'green');
+        }
+
+        function getScheduleDuration(group, movement) {
+            const phase = getSchedulePhase(group, movement);
+            return phase ? phase.duration : 0;
+        }
+
+        function setScheduleDuration(group, movement, seconds) {
+            const phase = getSchedulePhase(group, movement);
+            if (phase) phase.duration = Number(seconds);
+        }
+
+        function movementForPanelKey(key) {
+            if (key === 'left') return 'left';
+            if (key === 'straight' || key === 'right' || key === 'pedestrian') return 'through';
+            return null;
+        }
+
+        function getPanelValues(direction) {
+            const group = getDirectionGroup(direction === 'Panorama' ? 'North' : direction);
+            const through = getScheduleDuration(group, 'through');
+            return {
+                straight: through,
+                left: getScheduleDuration(group, 'left'),
+                right: through,
+                pedestrian: through
+            };
+        }
+
+        function phaseServesMovement(phase, group, movement) {
+            if (phase.group !== group || phase.state !== 'green') return false;
+            if (movement === 'straight' || movement === 'right' || movement === 'pedestrian') return phase.movement === 'through';
+            if (movement === 'left') return phase.movement === 'left';
+            return false;
+        }
+
+        function phaseClearsMovement(phase, group, movement) {
+            if (phase.group !== group || phase.state !== 'yellow') return false;
+            if (movement === 'straight' || movement === 'right') return phase.movement === 'through';
+            if (movement === 'left') return phase.movement === 'left';
+            return false;
+        }
+
+        function timeUntilNextGreen(snapshot, group, movement) {
+            let wait = snapshot.remaining;
+            for (let offset = 1; offset <= SIGNAL_SCHEDULE.length; offset++) {
+                const phase = SIGNAL_SCHEDULE[(snapshot.index + offset) % SIGNAL_SCHEDULE.length];
+                if (phaseServesMovement(phase, group, movement)) return wait;
+                wait += phase.duration;
+            }
+            return null;
+        }
+
+        function getSignalCell(dir, movement, snapshot) {
+            if (movement === 'uturn') return { color: 'off', time: '--' };
+            if (Date.now() < monitorAllRedUntil || monitorControlMode === 'Emergency') {
+                return { color: 'red', time: formatMatrixTime(Math.max(1, (monitorAllRedUntil - Date.now()) / 1000) || 30) };
+            }
+
+            const group = getDirectionGroup(dir);
+            if (phaseServesMovement(snapshot.phase, group, movement)) {
+                return { color: 'green', time: formatMatrixTime(snapshot.remaining) };
+            }
+            if (phaseClearsMovement(snapshot.phase, group, movement)) {
+                return { color: 'yellow', time: formatMatrixTime(snapshot.remaining) };
+            }
+            return { color: 'red', time: formatMatrixTime(timeUntilNextGreen(snapshot, group, movement)) };
+        }
+
+        function updateSignalMatrix() {
+            const body = document.getElementById('signal-matrix-body');
+            if (!body) return;
+            const snapshot = getScheduleSnapshot();
+            body.innerHTML = SIGNAL_DIRECTIONS.map(dir => {
+                const cells = SIGNAL_PHASES.map(phase => {
+                    const cell = getSignalCell(dir, phase.key, snapshot);
+                    const muted = cell.color === 'off' ? ' muted' : '';
+                    return `<td><span class="matrix-cell"><span class="matrix-dot ${cell.color}"></span><span class="matrix-time${muted}">${cell.time}</span></span></td>`;
+                }).join('');
+                return `<tr><td>${dir}</td>${cells}</tr>`;
+            }).join('');
+            return snapshot;
+        }
+
+        function setPhaseDirection(direction) {
+            selectedPhaseDirection = direction;
+            document.querySelectorAll('.phase-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.dir === direction));
+            const label = document.getElementById('phase-dir-label');
+            if (label) label.textContent = direction;
+            syncPhasePanelFromSchedule();
+            addLog(`[Monitor] Phase panel selected ${direction}`);
+        }
+
+        function syncPhasePanelFromSchedule() {
+            const source = getPanelValues(selectedPhaseDirection);
+            ['straight', 'left', 'right', 'pedestrian'].forEach(key => {
+                const input = document.getElementById(`phase-${key}`);
+                const val = document.getElementById(`phase-${key}-val`);
+                if (input) input.value = source[key];
+                if (val) val.textContent = source[key] + 's';
+            });
+            const editable = monitorControlMode === 'Manual';
+            ['straight', 'left', 'right', 'pedestrian'].forEach(key => {
+                const input = document.getElementById(`phase-${key}`);
+                if (input) input.disabled = !editable;
+            });
+        }
+
+        function setMonitorControlMode(mode) {
+            if ((mode === 'Manual' || mode === 'Emergency') && !requireSignalControlAuth(`切换到 ${mode} 模式`)) {
+                syncPhasePanelFromSchedule();
+                updateSignalUI();
+                return false;
+            }
+            monitorControlMode = mode;
+            document.querySelectorAll('.phase-mode').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+            if (mode === 'Emergency') monitorAllRedUntil = Date.now() + 30000;
+            if (mode !== 'Emergency') monitorAllRedUntil = 0;
+            syncPhasePanelFromSchedule();
+            addLog(`[Monitor] Control mode switched to ${mode}`);
+            updateSignalUI();
+            return true;
+        }
+
+        function adjustMonitorPhase(key, value) {
+            if (monitorControlMode !== 'Manual') {
+                syncPhasePanelFromSchedule();
+                addLog('[Monitor] Switch to Manual before adjusting phase duration');
+                return;
+            }
+            if (!requireSignalControlAuth(`调整 ${selectedPhaseDirection} ${key} 绿灯时长`)) {
+                syncPhasePanelFromSchedule();
+                return;
+            }
+            const seconds = Number(value);
+            const movement = movementForPanelKey(key);
+            if (!movement) return;
+            const groups = selectedPhaseDirection === 'Panorama'
+                ? ['NS', 'EW']
+                : [getDirectionGroup(selectedPhaseDirection)];
+            groups.forEach(group => setScheduleDuration(group, movement, seconds));
+            syncPhasePanelFromSchedule();
+            updateSignalUI();
+            addLog(`[Monitor] ${selectedPhaseDirection} ${key} schedule adjusted to ${seconds}s`);
+        }
+
+        function monitorAllRed() {
+            if (!setMonitorControlMode('Emergency')) return;
+            addLog('[Monitor] All Red activated');
+        }
+
+        function monitorManualRelease() {
+            if (!setMonitorControlMode('Manual')) return;
+            addLog('[Monitor] Manual Release activated');
+        }
+
+        function monitorResumeAI() {
+            monitorAllRedUntil = 0;
+            setMonitorControlMode('AI Auto');
+            addLog('[Monitor] Resume AI control');
+        }
+
         // =========== ROI 手动标框 + 检测引擎 ===========
         // 用户手动画的 ROI 列表，每项: { id, name, x, y, w, h, slots }
         let userROIs = [];
         let _roiIdCounter = 0;
+        let selectedMonitorRegionId = null;
         const ROI_COLORS = ['#f5e642', '#00e5ff', '#ff9500', '#a78bfa', '#f472b6'];
 
         // --- 自动为一个 ROI 区域生成车辆槽位 ---
@@ -2010,11 +3116,47 @@
             hint.style.display = _drawMode ? 'inline' : 'none';
         }
 
+        function getVideoDisplayRect() {
+            const container = document.getElementById('video-container');
+            const video = document.getElementById('video-feed');
+            if (!container) return { left: 0, top: 0, width: 1, height: 1 };
+            const rect = container.getBoundingClientRect();
+            const naturalW = video && video.videoWidth ? video.videoWidth : rect.width;
+            const naturalH = video && video.videoHeight ? video.videoHeight : rect.height;
+            const videoAspect = naturalW / Math.max(1, naturalH);
+            const containerAspect = rect.width / Math.max(1, rect.height);
+            let width = rect.width;
+            let height = rect.height;
+            let left = 0;
+            let top = 0;
+            if (containerAspect > videoAspect) {
+                width = rect.height * videoAspect;
+                left = (rect.width - width) / 2;
+            } else {
+                height = rect.width / videoAspect;
+                top = (rect.height - height) / 2;
+            }
+            return { left, top, width, height };
+        }
+
+        function clampPercent(value) {
+            return Math.max(0, Math.min(100, value));
+        }
+
+        function applyVideoPercentRect(el, x, y, w, h) {
+            const r = getVideoDisplayRect();
+            el.style.left = (r.left + x / 100 * r.width) + 'px';
+            el.style.top = (r.top + y / 100 * r.height) + 'px';
+            el.style.width = (w / 100 * r.width) + 'px';
+            el.style.height = (h / 100 * r.height) + 'px';
+        }
+
         function getRelativePos(e, container) {
             const rect = container.getBoundingClientRect();
+            const videoRect = getVideoDisplayRect();
             return {
-                x: (e.clientX - rect.left) / rect.width * 100,
-                y: (e.clientY - rect.top) / rect.height * 100
+                x: clampPercent((e.clientX - rect.left - videoRect.left) / videoRect.width * 100),
+                y: clampPercent((e.clientY - rect.top - videoRect.top) / videoRect.height * 100)
             };
         }
 
@@ -2035,10 +3177,7 @@
                     e.preventDefault();
                     _drawing = true;
                     _drawStart = getRelativePos(e, vc);
-                    preview.style.left = _drawStart.x + '%';
-                    preview.style.top = _drawStart.y + '%';
-                    preview.style.width = '0%';
-                    preview.style.height = '0%';
+                    applyVideoPercentRect(preview, _drawStart.x, _drawStart.y, 0, 0);
                     preview.style.display = 'block';
                 });
 
@@ -2049,10 +3188,7 @@
                     const y = Math.min(_drawStart.y, cur.y);
                     const w = Math.abs(cur.x - _drawStart.x);
                     const h = Math.abs(cur.y - _drawStart.y);
-                    preview.style.left = x + '%';
-                    preview.style.top = y + '%';
-                    preview.style.width = w + '%';
-                    preview.style.height = h + '%';
+                    applyVideoPercentRect(preview, x, y, w, h);
                 });
 
                 vc.addEventListener('mouseup', e => {
@@ -2077,25 +3213,50 @@
             }
         })();
 
+        window.addEventListener('resize', () => {
+            renderPersistentROIs();
+        });
+
         function addROI(x, y, w, h) {
             const id = 'roi-user-' + (++_roiIdCounter);
             const name = 'Zone ' + String.fromCharCode(64 + userROIs.length + 1); // A, B, C...
             const roi = { id, name, x, y, w, h, colorIdx: (userROIs.length) % ROI_COLORS.length };
             roi.slots = generateSlotsForROI(roi);
             userROIs.push(roi);
+            selectedMonitorRegionId = id;
             renderPersistentROIs();
+            updateMonitorRegionPanel([]);
             addLog(`[ROI] Added ${name}: (${x.toFixed(0)}%, ${y.toFixed(0)}%) ${w.toFixed(0)}x${h.toFixed(0)}%`);
         }
 
         function removeROI(id) {
             userROIs = userROIs.filter(r => r.id !== id);
+            if (selectedMonitorRegionId === id) selectedMonitorRegionId = userROIs.length ? userROIs[userROIs.length - 1].id : null;
             renderPersistentROIs();
+            updateMonitorRegionPanel([]);
         }
 
         function clearAllROIs() {
             userROIs = [];
             _roiIdCounter = 0;
+            selectedMonitorRegionId = null;
             renderPersistentROIs();
+            updateMonitorRegionPanel([]);
+        }
+
+        function getSelectedMonitorRegion() {
+            return userROIs.find(r => r.id === selectedMonitorRegionId) || null;
+        }
+
+        function getMonitorRegionName(region = getSelectedMonitorRegion()) {
+            return region ? region.name : '全局';
+        }
+
+        function selectMonitorRegion(id) {
+            selectedMonitorRegionId = id;
+            renderPersistentROIs();
+            updateMonitorRegionPanel([]);
+            addLog(`[ROI] Selected ${getMonitorRegionName()}`);
         }
 
         function renderPersistentROIs() {
@@ -2104,11 +3265,9 @@
             userROIs.forEach((roi, i) => {
                 const color = ROI_COLORS[roi.colorIdx];
                 const div = document.createElement('div');
-                div.className = 'roi-persistent';
-                div.style.left = roi.x + '%';
-                div.style.top = roi.y + '%';
-                div.style.width = roi.w + '%';
-                div.style.height = roi.h + '%';
+                div.className = 'roi-persistent' + (roi.id === selectedMonitorRegionId ? ' selected' : '');
+                div.onclick = () => selectMonitorRegion(roi.id);
+                applyVideoPercentRect(div, roi.x, roi.y, roi.w, roi.h);
                 // border
                 const border = document.createElement('div');
                 border.className = 'roi-border';
@@ -2126,7 +3285,10 @@
                 const del = document.createElement('button');
                 del.className = 'roi-delete';
                 del.textContent = '\u00d7';
-                del.onclick = () => removeROI(roi.id);
+                del.onclick = (event) => {
+                    event.stopPropagation();
+                    removeROI(roi.id);
+                };
                 div.appendChild(del);
                 layer.appendChild(div);
             });
@@ -2160,20 +3322,53 @@
         }
 
         // --- 渲染检测框 (只画 YOLO 小框, ROI 大框在持久层) ---
+        function detectionInROI(det, roi) {
+            const cx = det.x + det.w / 2;
+            const cy = det.y + det.h / 2;
+            return cx >= roi.x && cx <= roi.x + roi.w && cy >= roi.y && cy <= roi.y + roi.h;
+        }
+
+        function setRegionText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function updateMonitorRegionPanel(dets = []) {
+            const region = getSelectedMonitorRegion();
+            const scoped = region ? dets.filter(d => detectionInROI(d, region)) : dets;
+            const cars = scoped.filter(d => d.type === 'car').length;
+            const buses = scoped.filter(d => d.type === 'bus').length;
+            const trucks = scoped.filter(d => d.type === 'truck').length;
+            const vehicles = cars + buses + trucks;
+            const queue = Math.max(0, vehicles * 7 + (region ? Math.round(region.w + region.h) : 12));
+            const wait = vehicles > 0 ? (vehicles * 2.2 + (region ? region.colorIdx * 1.7 : 3.5)).toFixed(1) : '0.0';
+            const pressure = Math.max(0.12, Math.min(0.95, (vehicles * 0.07) + (region ? region.w * region.h / 9000 : 0.18)));
+            const pressureEl = document.getElementById('region-pressure');
+
+            setRegionText('monitor-region-name', getMonitorRegionName(region));
+            setRegionText('region-veh', vehicles);
+            setRegionText('region-queue', queue);
+            setRegionText('region-wait', wait);
+            setRegionText('region-pressure', pressure.toFixed(2));
+            setRegionText('region-car', cars);
+            setRegionText('region-bus', buses);
+            setRegionText('region-truck', trucks);
+            if (pressureEl) {
+                pressureEl.style.color = pressure < 0.4 ? 'var(--success)' : pressure < 0.7 ? 'var(--warning)' : 'var(--danger)';
+            }
+        }
+
         function renderDetections(dets) {
             const container = document.getElementById('yolo-boxes');
             container.innerHTML = '';
-            let cars = 0, buses = 0, persons = 0;
+            let cars = 0, buses = 0, trucks = 0;
             const roiVehCounts = {};
             userROIs.forEach(r => { roiVehCounts[r.id] = 0; });
 
             dets.forEach(d => {
                 const box = document.createElement('div');
                 box.className = `yolo-box cls-${d.type}`;
-                box.style.left = d.x + '%';
-                box.style.top = d.y + '%';
-                box.style.width = d.w + '%';
-                box.style.height = d.h + '%';
+                applyVideoPercentRect(box, d.x, d.y, d.w, d.h);
                 const rect = document.createElement('div');
                 rect.className = 'yolo-rect';
                 box.appendChild(rect);
@@ -2183,9 +3378,9 @@
                 box.appendChild(label);
                 container.appendChild(box);
 
-                if (d.type === 'car' || d.type === 'truck') { cars++; roiVehCounts[d.roiId]++; }
+                if (d.type === 'car') { cars++; roiVehCounts[d.roiId]++; }
+                else if (d.type === 'truck') { trucks++; roiVehCounts[d.roiId]++; }
                 else if (d.type === 'bus') { buses++; roiVehCounts[d.roiId]++; }
-                else if (d.type === 'person') persons++;
             });
 
             // 更新各持久 ROI 标签上的计数
@@ -2197,75 +3392,119 @@
                 }
             });
 
-            const vehicleCount = cars + buses;
+            const vehicleCount = cars + buses + trucks;
             document.getElementById('det-car').textContent = cars;
             document.getElementById('det-bus').textContent = buses;
-            document.getElementById('det-person').textContent = persons;
+            document.getElementById('det-truck').textContent = trucks;
             document.getElementById('bi-veh').textContent = vehicleCount;
+            updateMonitorRegionPanel(dets);
 
-            return { vehicleCount, cars, buses, persons };
+            return { vehicleCount, cars, buses, trucks, persons: 0 };
+        }
+
+        function getDetectionEndpoint() {
+            if (DETECTION_CONFIG.mode === 'edge') return DETECTION_CONFIG.edgeEndpoint;
+            return DETECTION_CONFIG.localEndpoint;
+        }
+
+        function captureVideoFrame() {
+            const video = document.getElementById('video-feed');
+            if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return null;
+            if (!_detectCanvas) _detectCanvas = document.createElement('canvas');
+            _detectCanvas.width = video.videoWidth;
+            _detectCanvas.height = video.videoHeight;
+            const ctx = _detectCanvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, _detectCanvas.width, _detectCanvas.height);
+            return _detectCanvas.toDataURL('image/jpeg', 0.78);
+        }
+
+        async function getDetections() {
+            if (userROIs.length === 0) {
+                _lastDetectionStats = { provider: 'idle', model: 'Draw ROI to detect', updatedAt: Date.now() };
+                return [];
+            }
+
+            if (DETECTION_CONFIG.mode === 'mock') {
+                _lastDetectionStats = { provider: 'mock', model: 'Mock ROI Generator' };
+                return generateDetections();
+            }
+
+            const endpoint = getDetectionEndpoint();
+            const image = captureVideoFrame();
+            if (!endpoint || !image) {
+                _lastDetectionStats = { provider: 'unavailable', model: 'YOLO waiting for video/backend', updatedAt: Date.now() };
+                return [];
+            }
+
+            try {
+                const confEl = document.getElementById('conf-val');
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image,
+                        rois: userROIs.map(({ id, name, x, y, w, h }) => ({ id, name, x, y, w, h })),
+                        conf: confEl ? Number(confEl.textContent) : 0.5
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                _lastDetectionStats = data.stats || { provider: DETECTION_CONFIG.mode };
+                _lastDetectionStats.updatedAt = Date.now();
+                _lastDetectionError = '';
+                return Array.isArray(data.detections) ? data.detections : [];
+            } catch (err) {
+                const msg = `${DETECTION_CONFIG.mode} detection unavailable: ${err.message}`;
+                if (_lastDetectionError !== msg) {
+                    addLog(msg);
+                    _lastDetectionError = msg;
+                }
+                _lastDetectionStats = { provider: 'unavailable', model: 'YOLO unavailable', updatedAt: Date.now() };
+                return [];
+            }
         }
 
         // --- 信号灯 UI 更新 ---
-        // --- 信号灯 UI (四方向 + 圆环倒计时) ---
+        // --- 信号灯 UI (矩阵 + 相位控制面板) ---
         function updateSignalUI() {
             FSM.tick();
             const state = FSM.state;
             const cd = FSM.countdown;
-            const cdText = Math.ceil(cd) + 's';
-            const circumference = 169.6; // 2 * PI * 27
-            const totalDur = FSM.getTotalDuration();
-            const progress = totalDur > 0 ? cd / totalDur : 0;
-            const arcOffset = circumference * (1 - progress);
             const stateColor = state === 'RED' ? 'var(--danger)' : state === 'GREEN' ? 'var(--success)' : 'var(--warning)';
-
-            // NS 方向 (主干道 = 跟随 FSM)
-            const tlNS = document.getElementById('tl-ns');
-            tlNS.querySelector('.red').classList.toggle('on', state === 'RED');
-            tlNS.querySelector('.yellow').classList.toggle('on', state === 'YELLOW');
-            tlNS.querySelector('.green').classList.toggle('on', state === 'GREEN');
-            document.getElementById('cd-ns').textContent = cdText;
-            document.getElementById('cd-ns').style.color = stateColor;
-            const arcNS = document.getElementById('cd-arc-ns');
-            arcNS.style.strokeDashoffset = arcOffset;
-            arcNS.style.stroke = stateColor;
-
-            // EW 方向 (支路 = NS 的反相)
-            const ewState = state === 'RED' ? 'GREEN' : state === 'GREEN' ? 'RED' : 'YELLOW';
-            const ewColor = ewState === 'RED' ? 'var(--danger)' : ewState === 'GREEN' ? 'var(--success)' : 'var(--warning)';
-            const tlEW = document.getElementById('tl-ew');
-            tlEW.querySelector('.red').classList.toggle('on', ewState === 'RED');
-            tlEW.querySelector('.yellow').classList.toggle('on', ewState === 'YELLOW');
-            tlEW.querySelector('.green').classList.toggle('on', ewState === 'GREEN');
-            document.getElementById('cd-ew').textContent = cdText;
-            document.getElementById('cd-ew').style.color = ewColor;
-            const arcEW = document.getElementById('cd-arc-ew');
-            arcEW.style.strokeDashoffset = arcOffset;
-            arcEW.style.stroke = ewColor;
-
-            // 行人 (NS红灯 = 行人绿灯)
-            const pedGreen = state === 'RED';
-            const pedColor = pedGreen ? 'var(--success)' : 'var(--danger)';
-            const tlPed = document.getElementById('tl-ped');
-            tlPed.querySelector('.red').classList.toggle('on', !pedGreen);
-            tlPed.querySelector('.green').classList.toggle('on', pedGreen);
-            document.getElementById('cd-ped').textContent = pedGreen ? cdText : '--';
-            document.getElementById('cd-ped').style.color = pedColor;
-            const arcPed = document.getElementById('cd-arc-ped');
-            arcPed.style.strokeDashoffset = pedGreen ? arcOffset : circumference;
-            arcPed.style.stroke = pedColor;
+            const schedule = updateSignalMatrix();
 
             // FSM 中心区
-            document.getElementById('fsm-state-text').textContent = state;
-            document.getElementById('fsm-state-text').style.color = stateColor;
-            document.getElementById('fsm-veh-count').textContent = FSM.vehicleCount;
+            const fsmState = document.getElementById('fsm-state-text');
+            if (fsmState) {
+                fsmState.textContent = state;
+                fsmState.style.color = stateColor;
+            }
+            const fsmVeh = document.getElementById('fsm-veh-count');
+            if (fsmVeh) fsmVeh.textContent = FSM.vehicleCount;
             const gd = FSM.greenDuration;
-            document.getElementById('fsm-green-dur').textContent = gd > 0 ? gd + 's' : '--';
+            const fsmGreen = document.getElementById('fsm-green-dur');
+            if (fsmGreen) fsmGreen.textContent = gd > 0 ? gd + 's' : '--';
+            const latency = document.getElementById('phase-latency');
+            if (latency) latency.textContent = Math.max(8, Math.round(12 + Math.sin(Date.now() / 1800) * 3));
 
             // 压力卡片中的 FSM badge
             const badge = document.getElementById('fsm-badge');
-            badge.textContent = state;
-            badge.className = 'fsm-state ' + state;
+            if (badge) {
+                badge.textContent = state;
+                badge.className = 'fsm-state ' + state;
+            }
+            const panelBadge = document.getElementById('phase-fsm-badge');
+            if (panelBadge) {
+                const displayState = Date.now() < monitorAllRedUntil || monitorControlMode === 'Emergency' ? 'ALL RED' : state;
+                panelBadge.textContent = displayState;
+                panelBadge.className = 'fsm-state ' + (displayState === 'ALL RED' ? 'RED' : state);
+            }
+            const panelReason = document.getElementById('phase-fsm-reason');
+            if (panelReason) {
+                const phaseName = schedule ? schedule.phase.name : 'Fixed schedule';
+                const remain = schedule ? Math.ceil(schedule.remaining) : Math.ceil(cd);
+                panelReason.textContent = `Mode: ${monitorControlMode} | Schedule: ${phaseName} | Next: ${remain}s`;
+            }
         }
 
         // --- 压力可视化 ---
@@ -2335,6 +3574,21 @@
 
         // --- AI Stats 模拟 ---
         function updateAIStats() {
+            const hasLiveStats = _lastDetectionStats && Date.now() - (_lastDetectionStats.updatedAt || 0) < 3500;
+            if (hasLiveStats && _lastDetectionStats.provider !== 'mock') {
+                const inferMs = Math.round(Number(_lastDetectionStats.infer_ms || 0));
+                const fps = inferMs > 0 ? Math.max(1, Math.floor(1000 / inferMs)) : 0;
+                const mem = Math.round(Number(_lastDetectionStats.mem_mb || 0));
+                document.getElementById('ai-model-name').textContent = _lastDetectionStats.model || 'YOLOv8n';
+                document.getElementById('npu-load').textContent = _lastDetectionStats.provider === 'edge' ? 'Edge' : 'Local';
+                document.getElementById('npu-load').style.color = _lastDetectionStats.provider === 'edge' ? 'var(--v2x-blue)' : '#0f0';
+                document.getElementById('ai-infer-ms').textContent = inferMs || '--';
+                document.getElementById('ai-fps').textContent = fps || '--';
+                document.getElementById('ai-mem').textContent = mem || '--';
+                document.getElementById('bi-ms').textContent = inferMs || '--';
+                document.getElementById('bi-fps').textContent = fps || '--';
+                return;
+            }
             const npu = Math.floor(Math.random() * 25) + 35;
             const inferMs = Math.floor(Math.random() * 8) + 42; // 42-50ms 更接近实际板端
             const boardFps = (1000 / inferMs).toFixed(2);       // ~1fps 板端推理帧率
@@ -2351,30 +3605,39 @@
 
         // --- 交通数据面板 ---
         function updateTrafficData(vehicleCount) {
-            document.getElementById('live-flow').textContent = vehicleCount;
+            const flowEl = document.getElementById('live-flow');
             const queue = Math.max(0, vehicleCount * 8 + Math.floor(Math.random() * 15));
             const wait = vehicleCount > 0 ? (vehicleCount * 2.5 + Math.random() * 5).toFixed(1) : '0.0';
-            document.getElementById('live-queue').textContent = queue;
-            document.getElementById('live-wait').textContent = wait;
+            if (flowEl) flowEl.textContent = vehicleCount;
+            const queueEl = document.getElementById('live-queue');
+            if (queueEl) queueEl.textContent = queue;
+            const waitEl = document.getElementById('live-wait');
+            if (waitEl) waitEl.textContent = wait;
         }
 
         // --- 主循环 ---
         let monitorTimers = {};
         function startMonitorEngine() {
-            // 推理周期: 每 1.5s 生成新检测 (模拟板端 ~1fps)
-            monitorTimers.infer = setInterval(() => {
-                const dets = generateDetections();
-                const { vehicleCount, persons } = renderDetections(dets);
+            // 推理周期: 每 500ms 检测一次 (2Hz)
+            monitorTimers.infer = setInterval(async () => {
+                if (_detectInFlight) return;
+                _detectInFlight = true;
+                try {
+                    const dets = await getDetections();
+                    const { vehicleCount, persons } = renderDetections(dets);
 
-                // 更新 FSM
-                FSM.update(vehicleCount);
+                    // 更新 FSM
+                    FSM.update(vehicleCount);
 
-                // 更新压力可视化 (传入行人数)
-                updatePressure(vehicleCount, persons);
+                    // 更新压力可视化 (传入行人数)
+                    updatePressure(vehicleCount, persons);
 
-                // 更新交通数据
-                updateTrafficData(vehicleCount);
-            }, 1500);
+                    // 更新交通数据
+                    updateTrafficData(vehicleCount);
+                } finally {
+                    _detectInFlight = false;
+                }
+            }, 500);
 
             // 信号灯 UI: 每 200ms 刷新倒计时
             monitorTimers.signal = setInterval(updateSignalUI, 200);
@@ -2382,92 +3645,989 @@
             // AI 统计: 每 1s 更新
             monitorTimers.aiStats = setInterval(updateAIStats, 1000);
 
-            // 其他页面的数据
-            setInterval(() => {
-                const traffic = 12458 + Math.floor(Math.random() * 10);
-                const el = document.getElementById('dash-traffic');
-                if (el) el.textContent = traffic.toLocaleString();
-            }, 3000);
         }
 
         function startDynamicData() { /* replaced by startMonitorEngine */ }
         function updatePressureVisualization() { /* replaced by startMonitorEngine */ }
 
-        // ============= SUMO 5环路网仿真引擎 =============
+        // ============= 城市路网仿真地图引擎 =============
         const SUMO = {
-            rings: [60, 110, 160, 210, 260],
-            angleCount: 8,
+            map: null,
+            markerLayer: null,
+            pressureLayer: null,
+            vehicleLayer: null,
+            scenarioLayer: null,
+            statAreaDimLayer: null,
+            markerById: {},
+            linkById: {},
+            calibrationMode: false,
+            lineEditMode: false,
+            statAreaLayer: null,
+            statAreaMode: false,
+            statAreaPoints: [],
+            statAreaPolygon: null,
+            statAreaDraft: [],
+            statAreaDrawing: false,
+            statAreaDragMoved: false,
+            statAreaDragStart: null,
+            ignoreNextAreaClick: false,
+            addIntersectionMode: false,
+            pendingLineStart: null,
+            selectedLineId: null,
+            intersections: [
+                { id: 'A1', name: '复兴东路/浦东南路', lat: 31.22939, lng: 121.511965, pressure: 0.28 },
+                { id: 'B2', name: '世纪大道/陆家嘴环路', lat: 31.237279, lng: 121.504498, pressure: 0.46 },
+                { id: 'C3', name: '世纪大道/浦东南路', lat: 31.235885, lng: 121.508789, pressure: 0.34 },
+                { id: 'D4', name: '商城路/浦东南路', lat: 31.232032, lng: 121.51072, pressure: 0.62 },
+                { id: 'E5', name: '商城路/东方路', lat: 31.235041, lng: 121.519303, pressure: 0.74 },
+                { id: 'F6', name: '世纪大道/东方路', lat: 31.232032, lng: 121.520762, pressure: 0.52 },
+                { id: 'G7', name: '世纪大道/商城路', lat: 31.233647, lng: 121.516256, pressure: 0.44 },
+                { id: 'N8', name: '浦东南路/潍坊路', lat: 31.22539, lng: 121.513381, pressure: 0.3 },
+                { id: 'N9', name: '东方路/潍坊路', lat: 31.227995, lng: 121.522436, pressure: 0.3 },
+                { id: 'N10', name: '张杨路/浦城路', lat: 31.228289, lng: 121.508961, pressure: 0.3 },
+                { id: 'N11', name: '东昌路/浦城路', lat: 31.234197, lng: 121.505742, pressure: 0.3 },
+                { id: 'N12', name: '商城路/浦城路', lat: 31.231151, lng: 121.507287, pressure: 0.3 },
+                { id: 'N13', name: '潍坊西路/浦城路', lat: 31.224271, lng: 121.510806, pressure: 0.3 },
+                { id: 'N14', name: '东方路/乳山路', lat: 31.237518, lng: 121.517694, pressure: 0.3 },
+                { id: 'N15', name: '潍坊路/崂山路', lat: 31.227041, lng: 121.519561, pressure: 0.3 },
+                { id: 'N16', name: '潍坊路/南泉北路', lat: 31.225867, lng: 121.515913, pressure: 0.3 },
+                { id: 'N17', name: '商城路/南泉北路', lat: 31.232656, lng: 121.513209, pressure: 0.3 },
+                { id: 'N18', name: '张杨路/崂山路', lat: 31.231078, lng: 121.51808, pressure: 0.3 },
+                { id: 'N19', name: '张杨路/南泉北路', lat: 31.229812, lng: 121.51381, pressure: 0.3 },
+                { id: 'N20', name: '崂山路/乳山路', lat: 31.236656, lng: 121.515419, pressure: 0.3 },
+                { id: 'N21', name: '世纪大道/乳山路', lat: 31.235096, lng: 121.511471, pressure: 0.3 },
+                { id: 'N22', name: '世纪大道/南泉北路', lat: 31.234592, lng: 121.512941, pressure: 0.3 },
+                { id: 'N23', name: '乳山路/南泉北路', lat: 31.235527, lng: 121.512705, pressure: 0.3 }
+            ],
+            links: [
+                { id: 'l-b2-c3', nodes: ['B2', 'C3'], pressure: 0.35 },
+                { id: 'l-c3-d4', nodes: ['C3', 'D4'], pressure: 0.35 },
+                { id: 'l-d4-a1', nodes: ['D4', 'A1'], pressure: 0.35 },
+                { id: 'l-f6-g7', nodes: ['F6', 'G7'], pressure: 0.35 },
+                { id: 'l-e5-g7', nodes: ['E5', 'G7'], pressure: 0.35 },
+                { id: 'l-e5-f6', nodes: ['E5', 'F6'], pressure: 0.35 },
+                { id: 'l-b2-n11', nodes: ['B2', 'N11'], pressure: 0.35 },
+                { id: 'l-n11-c3', nodes: ['N11', 'C3'], pressure: 0.35 },
+                { id: 'l-n11-n12', nodes: ['N11', 'N12'], pressure: 0.35 },
+                { id: 'l-n12-n10', nodes: ['N12', 'N10'], pressure: 0.35 },
+                { id: 'l-n10-n13', nodes: ['N10', 'N13'], pressure: 0.35 },
+                { id: 'l-n13-n8', nodes: ['N13', 'N8'], pressure: 0.35 },
+                { id: 'l-n8-n16', nodes: ['N8', 'N16'], pressure: 0.35 },
+                { id: 'l-n8-a1', nodes: ['N8', 'A1'], pressure: 0.35 },
+                { id: 'l-a1-n10', nodes: ['A1', 'N10'], pressure: 0.35 },
+                { id: 'l-n19-n16', nodes: ['N19', 'N16'], pressure: 0.35 },
+                { id: 'l-n16-n15', nodes: ['N16', 'N15'], pressure: 0.35 },
+                { id: 'l-n17-n19', nodes: ['N17', 'N19'], pressure: 0.35 },
+                { id: 'l-g7-n18', nodes: ['G7', 'N18'], pressure: 0.35 },
+                { id: 'l-n15-n18', nodes: ['N15', 'N18'], pressure: 0.35 },
+                { id: 'l-n9-f6', nodes: ['N9', 'F6'], pressure: 0.35 },
+                { id: 'l-n15-n9', nodes: ['N15', 'N9'], pressure: 0.35 },
+                { id: 'l-e5-n14', nodes: ['E5', 'N14'], pressure: 0.35 },
+                { id: 'l-n14-n20', nodes: ['N14', 'N20'], pressure: 0.35 },
+                { id: 'l-g7-n20', nodes: ['G7', 'N20'], pressure: 0.35 },
+                { id: 'l-c3-n21', nodes: ['C3', 'N21'], pressure: 0.35 },
+                { id: 'l-n17-g7', nodes: ['N17', 'G7'], pressure: 0.35 },
+                { id: 'l-n21-n22', nodes: ['N21', 'N22'], pressure: 0.35 },
+                { id: 'l-n17-n22', nodes: ['N17', 'N22'], pressure: 0.35 },
+                { id: 'l-g7-n22', nodes: ['G7', 'N22'], pressure: 0.35 },
+                { id: 'l-n12-d4', nodes: ['N12', 'D4'], pressure: 0.35 },
+                { id: 'l-n17-d4', nodes: ['N17', 'D4'], pressure: 0.35 },
+                { id: 'l-n20-n23', nodes: ['N20', 'N23'], pressure: 0.35 },
+                { id: 'l-n21-n23', nodes: ['N21', 'N23'], pressure: 0.35 },
+                { id: 'l-n23-n22', nodes: ['N23', 'N22'], pressure: 0.35 },
+                { id: 'l-n19-n18', nodes: ['N19', 'N18'], pressure: 0.35 },
+                { id: 'l-a1-n19', nodes: ['A1', 'N19'], pressure: 0.35 },
+                { id: 'l-f6-n18', nodes: ['F6', 'N18'], pressure: 0.35 }
+            ],
+            manualChecks: [
+                { id: 'B2', reason: 'SoftBus signal unstable' },
+                { id: 'E5', reason: 'Camera heartbeat weak' }
+            ],
             vehicles: [],
             nodes: [],
             step: 0,
             maxStep: 800,
             running: false,
+            autoLoop: true,
             speed: 1,
             vehicleCount: 50,
             _animFrame: null,
             _lastTick: 0,
 
             init() {
+                if (this._animFrame) cancelAnimationFrame(this._animFrame);
                 this.step = 0;
                 this.running = false;
+                this.createMap();
+                this.createPressureLinks();
                 this.createNodes();
-                this.createVehicles();
+                this.clearVehicles();
                 this.updateUI();
+                this.updateNetworkStatus();
                 document.getElementById('sumo-status').textContent = 'Ready';
                 document.getElementById('sumo-status').style.color = 'var(--warning)';
                 document.getElementById('sumo-progress').style.width = '0%';
                 document.getElementById('sumo-step').textContent = '0';
                 document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-play"></i> Start';
-                // 清除事故/施工标记
-                document.getElementById('sumo-markers').innerHTML = '';
-                // 重置环路颜色
-                const ringsG = document.getElementById('sumo-rings');
-                Array.from(ringsG.children).forEach(c => {
-                    c.setAttribute('stroke', 'url(#roadGrad)');
-                    c.removeAttribute('stroke-dasharray');
-                });
+                this.resizeMap();
+            },
+
+            loadSavedMapConfig() {
+                try {
+                    const raw = localStorage.getItem('sumoMapCalibration');
+                    if (!raw) return;
+                    const saved = JSON.parse(raw);
+                    if (Array.isArray(saved.intersections)) this.intersections = saved.intersections;
+                    if (Array.isArray(saved.links)) this.links = saved.links;
+                } catch (err) {
+                    addLog(`[Map Calibration] Failed to load saved config: ${err.message}`);
+                }
+            },
+
+            getMapConfig() {
+                return {
+                    intersections: this.intersections.map(({ id, name, lat, lng, pressure }) => ({ id, name, lat, lng, pressure })),
+                    links: this.links.map(({ id, nodes, pressure }) => ({ id, nodes: [...nodes], pressure }))
+                };
+            },
+
+            async saveMapConfig() {
+                const config = this.getMapConfig();
+                const text = JSON.stringify(config, null, 2);
+                localStorage.setItem('sumoMapCalibration', text);
+                try {
+                    await navigator.clipboard.writeText(text);
+                    addLog('[Map Calibration] Saved to localStorage and copied config to clipboard');
+                } catch (err) {
+                    addLog('[Map Calibration] Saved to localStorage; clipboard copy failed');
+                    console.log(text);
+                }
+                return text;
+            },
+
+            createMap() {
+                const fallback = document.getElementById('sumo-map-fallback');
+                if (!window.L) {
+                    if (fallback) fallback.style.display = 'flex';
+                    return;
+                }
+                if (fallback) fallback.style.display = 'none';
+                if (!this.map) {
+                    this.map = L.map('sumo-leaflet-map', {
+                        zoomControl: true,
+                        attributionControl: true,
+                        preferCanvas: true,
+                        minZoom: 14,
+                        maxZoom: 17,
+                        maxBounds: [[31.219, 121.497], [31.242, 121.533]],
+                        maxBoundsViscosity: 1.0
+                    }).setView([31.2299, 121.5162], 15);
+                    const localTiles = L.tileLayer('map-tiles/voyager/{z}/{x}/{y}@2x.png', {
+                        minZoom: 14,
+                        maxZoom: 17,
+                        bounds: [[31.219, 121.497], [31.242, 121.533]],
+                        noWrap: true,
+                        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+                    }).addTo(this.map);
+                    localTiles.on('tileerror', () => {
+                        const fb = document.getElementById('sumo-map-fallback');
+                        if (fb) fb.style.display = 'flex';
+                    });
+                    this.map.createPane('trafficRoutes');
+                    this.map.getPane('trafficRoutes').style.zIndex = 450;
+                    this.map.createPane('trafficStatsDim');
+                    this.map.getPane('trafficStatsDim').style.zIndex = 735;
+                    this.map.createPane('trafficStatsArea');
+                    this.map.getPane('trafficStatsArea').style.zIndex = 760;
+                    this.map.createPane('trafficVehicles');
+                    this.map.getPane('trafficVehicles').style.zIndex = 620;
+                    this.map.createPane('trafficNodes');
+                    this.map.getPane('trafficNodes').style.zIndex = 700;
+                    this.pressureLayer = L.layerGroup().addTo(this.map);
+                    this.statAreaDimLayer = L.layerGroup().addTo(this.map);
+                    this.statAreaLayer = L.layerGroup().addTo(this.map);
+                    this.vehicleLayer = L.layerGroup().addTo(this.map);
+                    this.markerLayer = L.layerGroup().addTo(this.map);
+                    this.scenarioLayer = L.layerGroup().addTo(this.map);
+                    this.map.on('click', (event) => this.handleMapClick(event));
+                    this.map.on('mousedown', (event) => this.handleStatsAreaMouseDown(event));
+                    this.map.on('mousemove', (event) => this.handleStatsAreaMouseMove(event));
+                    this.map.on('mouseup', (event) => this.handleStatsAreaMouseUp(event));
+                }
+                this.pressureLayer.clearLayers();
+                this.vehicleLayer.clearLayers();
+                this.markerLayer.clearLayers();
+                if (this.statAreaDimLayer) this.statAreaDimLayer.clearLayers();
+                if (this.statAreaLayer) this.statAreaLayer.clearLayers();
+                if (this.statAreaPolygon && this.statAreaPoints.length >= 3) this.renderStatsAreaSelection();
+                if (this.scenarioLayer) this.scenarioLayer.clearLayers();
+                this.markerById = {};
+                this.linkById = {};
+            },
+
+            handleMapClick(event) {
+                if (this.statAreaMode) {
+                    if (this.ignoreNextAreaClick) {
+                        this.ignoreNextAreaClick = false;
+                    }
+                    return;
+                }
+                if (this.addIntersectionMode) {
+                    this.addIntersectionAt(event.latlng);
+                }
+            },
+
+            handleStatsAreaMouseDown(event) {
+                if (!this.statAreaMode) return;
+                this.statAreaDrawing = true;
+                this.statAreaDragMoved = false;
+                this.statAreaDragStart = event.latlng;
+                L.DomEvent.stop(event.originalEvent);
+            },
+
+            handleStatsAreaMouseMove(event) {
+                if (!this.statAreaMode || !this.statAreaDrawing || !this.statAreaDragStart) return;
+                const start = this.map.latLngToLayerPoint(this.statAreaDragStart);
+                const current = this.map.latLngToLayerPoint(event.latlng);
+                if (!this.statAreaDragMoved && start.distanceTo(current) < 8) return;
+                this.statAreaDragMoved = true;
+                this.setStatsAreaRectangle(this.statAreaDragStart, event.latlng);
+                this.renderStatsAreaDraft();
+                L.DomEvent.stop(event.originalEvent);
+            },
+
+            handleStatsAreaMouseUp(event) {
+                if (!this.statAreaMode || !this.statAreaDrawing) return;
+                this.statAreaDrawing = false;
+                if (this.statAreaDragMoved) {
+                    this.setStatsAreaRectangle(this.statAreaDragStart, event.latlng);
+                    this.ignoreNextAreaClick = true;
+                    if (this.statAreaPoints.length >= 3) this.finishStatsArea();
+                }
+                this.statAreaDragStart = null;
+                L.DomEvent.stop(event.originalEvent);
             },
 
             createNodes() {
-                const g = document.getElementById('traffic-nodes');
-                g.innerHTML = '';
                 this.nodes = [];
-                this.rings.forEach((r) => {
-                    for (let ai = 0; ai < this.angleCount; ai++) {
-                        const angle = (ai * 45) * Math.PI / 180;
-                        const x = 300 + r * Math.sin(angle);
-                        const y = 300 - r * Math.cos(angle);
-                        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                        circle.setAttribute('cx', x);
-                        circle.setAttribute('cy', y);
-                        circle.setAttribute('r', 4.5);
-                        circle.setAttribute('fill', '#52c41a');
-                        g.appendChild(circle);
-                        this.nodes.push({ x, y, state: 'green', el: circle });
-                    }
+                if (!this.markerLayer) return;
+                this.intersections.forEach((node) => {
+                    this.createIntersectionMarker(node);
                 });
             },
 
-            createVehicles() {
-                const g = document.getElementById('sumo-vehicles');
-                g.innerHTML = '';
-                this.vehicles = [];
-                for (let i = 0; i < this.vehicleCount; i++) {
-                    const isRing = Math.random() > 0.4;
-                    const ring = this.rings[Math.floor(Math.random() * 5)];
-                    const angleStart = Math.random() * 360;
-                    const radialAngle = Math.floor(Math.random() * 8) * 45;
-                    const radialPos = 50 + Math.random() * 220;
-                    const speed = (0.4 + Math.random() * 0.7) * (isRing ? 1 : 1.2);
-                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    rect.setAttribute('width', 8);
-                    rect.setAttribute('height', 4);
-                    rect.setAttribute('rx', 1);
-                    rect.setAttribute('fill', isRing ? '#00ff9d' : '#00d4ff');
-                    rect.setAttribute('opacity', '0.85');
-                    g.appendChild(rect);
-                    this.vehicles.push({ el: rect, isRing, ring, angle: angleStart, radialAngle, radialPos, speed, baseSpeed: speed });
+            createIntersectionMarker(node) {
+                if (!this.markerLayer) return null;
+                const marker = L.marker([node.lat, node.lng], {
+                    icon: this.createIntersectionIcon(node.id),
+                    title: node.name,
+                    draggable: this.calibrationMode && !this.lineEditMode,
+                    bubblingMouseEvents: false,
+                    pane: 'trafficNodes'
+                }).addTo(this.markerLayer);
+                const issue = this.getManualCheck(node.id);
+                marker.bindTooltip(`${node.id} ${node.name}${issue ? '<br>Manual Check: ' + issue.reason : ''}`, {
+                    direction: 'top',
+                    offset: [0, -16],
+                    opacity: 0.92
+                });
+                marker.on('click', () => this.handleIntersectionClick(node.id));
+                marker.on('dragend', () => this.updateIntersectionPosition(node.id, marker.getLatLng()));
+                this.markerById[node.id] = marker;
+                this.nodes.push({ ...node, state: 'ready', marker });
+                return marker;
+            },
+
+            handleIntersectionClick(id) {
+                if (this.statAreaMode || this.addIntersectionMode) return;
+                if (!this.calibrationMode) {
+                    openIntersectionMonitor(id);
+                    return;
                 }
+                if (!this.lineEditMode) return;
+                if (!this.pendingLineStart) {
+                    this.pendingLineStart = id;
+                    addLog(`[Map Calibration] Line start: ${id}; click another intersection`);
+                    return;
+                }
+                if (this.pendingLineStart === id) {
+                    addLog('[Map Calibration] Pick a different intersection for the line end');
+                    return;
+                }
+                this.addMapLine(this.pendingLineStart, id);
+                this.pendingLineStart = null;
+            },
+
+            updateIntersectionPosition(id, latLng, shouldLog = true) {
+                const node = this.intersections.find(item => item.id === id);
+                if (!node) return;
+                node.lat = Number(latLng.lat.toFixed(6));
+                node.lng = Number(latLng.lng.toFixed(6));
+                const marker = this.markerById[id];
+                if (marker) marker.setLatLng([node.lat, node.lng]);
+                this.links.forEach(link => {
+                    if (!link.nodes.includes(id)) return;
+                    const line = this.linkById[link.id];
+                    const points = link.nodes.map(nodeId => {
+                        const item = this.intersections.find(n => n.id === nodeId);
+                        return [item.lat, item.lng];
+                    });
+                    if (line) line.setLatLngs(points);
+                });
+                const issue = this.getManualCheck(id);
+                if (marker) marker.bindTooltip(`${node.id} ${node.name}<br>${node.lat}, ${node.lng}${issue ? '<br>Manual Check: ' + issue.reason : ''}`, {
+                    direction: 'top',
+                    offset: [0, -16],
+                    opacity: 0.92
+                });
+                this.updateVehiclesForIntersection(id);
+                if (shouldLog) addLog(`[Map Calibration] ${id}: lat=${node.lat}, lng=${node.lng}`);
+            },
+
+            updateVehiclesForIntersection(id) {
+                this.vehicles.forEach(vehicle => {
+                    if (vehicle.fromId !== id && vehicle.toId !== id) return;
+                    this.positionVehicleOnRoute(vehicle);
+                });
+            },
+
+            addMapLine(startId, endId) {
+                const exists = this.links.some(link =>
+                    link.nodes.includes(startId) && link.nodes.includes(endId)
+                );
+                if (exists) {
+                    addLog(`[Map Calibration] Line ${startId}-${endId} already exists`);
+                    return;
+                }
+                const id = `l-${startId.toLowerCase()}-${endId.toLowerCase()}`;
+                const link = { id, nodes: [startId, endId], pressure: 0.35 };
+                this.links.push(link);
+                this.drawMapLine(link);
+                addLog(`[Map Calibration] Added line ${startId} -> ${endId}`);
+            },
+
+            deleteSelectedLine() {
+                if (!this.selectedLineId) {
+                    addLog('[Map Calibration] Select a line first');
+                    return;
+                }
+                const layer = this.linkById[this.selectedLineId];
+                if (layer && this.pressureLayer) this.pressureLayer.removeLayer(layer);
+                this.links = this.links.filter(link => link.id !== this.selectedLineId);
+                addLog(`[Map Calibration] Deleted line ${this.selectedLineId}`);
+                delete this.linkById[this.selectedLineId];
+                this.selectedLineId = null;
+                this.refreshLineStyles();
+                this.updateRoadVolumes();
+            },
+
+            setCalibrationMode(enabled) {
+                this.calibrationMode = enabled;
+                if (enabled) this.pause();
+                if (!enabled) {
+                    this.lineEditMode = false;
+                    this.pendingLineStart = null;
+                    this.selectedLineId = null;
+                }
+                Object.values(this.markerById).forEach(marker => {
+                    if (!marker.dragging) return;
+                    if (enabled && !this.lineEditMode) marker.dragging.enable();
+                    else marker.dragging.disable();
+                });
+                const btn = document.getElementById('sumo-calibrate-btn');
+                if (btn) {
+                    btn.classList.toggle('active', enabled);
+                    btn.innerHTML = enabled
+                        ? '<i class="fas fa-location-crosshairs"></i> Calibrating'
+                        : '<i class="fas fa-location-crosshairs"></i> Calibrate';
+                }
+                const lineBtn = document.getElementById('sumo-line-btn');
+                const deleteBtn = document.getElementById('sumo-delete-line-btn');
+                if (lineBtn) {
+                    lineBtn.disabled = !enabled;
+                    lineBtn.classList.toggle('active', enabled && this.lineEditMode);
+                    lineBtn.innerHTML = enabled && this.lineEditMode
+                        ? '<i class="fas fa-route"></i> Adding Line'
+                        : '<i class="fas fa-route"></i> Add Line';
+                }
+                if (deleteBtn) deleteBtn.disabled = !enabled;
+                addLog(enabled ? '[Map Calibration] Enabled; use Add Line/Delete Line to edit links' : '[Map Calibration] Disabled');
+            },
+
+            setLineEditMode(enabled) {
+                if (!this.calibrationMode) return;
+                if (enabled) {
+                    this.setStatsAreaMode(false);
+                    this.setAddIntersectionMode(false);
+                }
+                this.lineEditMode = enabled;
+                this.pendingLineStart = null;
+                Object.values(this.markerById).forEach(marker => {
+                    if (!marker.dragging) return;
+                    if (enabled) marker.dragging.disable();
+                    else marker.dragging.enable();
+                });
+                const btn = document.getElementById('sumo-line-btn');
+                if (btn) {
+                    btn.classList.toggle('active', enabled);
+                    btn.innerHTML = enabled
+                        ? '<i class="fas fa-route"></i> Adding Line'
+                        : '<i class="fas fa-route"></i> Add Line';
+                }
+                addLog(enabled ? '[Map Calibration] Click two intersections to add a line' : '[Map Calibration] Line edit disabled');
+            },
+
+            setStatsAreaMode(enabled) {
+                const wasDrawing = this.statAreaMode;
+                this.statAreaMode = enabled;
+                if (enabled) {
+                    this.setAddIntersectionMode(false);
+                    if (this.lineEditMode) this.setLineEditMode(false);
+                    if (this.map) {
+                        this.map.dragging.disable();
+                        this.map.getContainer().style.cursor = 'crosshair';
+                    }
+                    this.statAreaPoints = [];
+                    this.clearStatsAreaLayers();
+                    this.statAreaDrawing = false;
+                    this.statAreaDragMoved = false;
+                    this.statAreaDragStart = null;
+                    this.ignoreNextAreaClick = false;
+                    addLog('[Stats Area] Drag on map to draw a rectangle area');
+                } else if (wasDrawing && !this.statAreaPolygon) {
+                    this.statAreaPoints = [];
+                    this.clearStatsAreaLayers();
+                    this.updateRoadVolumes();
+                }
+                if (!enabled && this.map) {
+                    this.map.dragging.enable();
+                    this.map.getContainer().style.cursor = '';
+                    this.statAreaDrawing = false;
+                    this.statAreaDragMoved = false;
+                    this.statAreaDragStart = null;
+                }
+                const btn = document.getElementById('sumo-area-btn');
+                const finishBtn = document.getElementById('sumo-finish-area-btn');
+                if (btn) {
+                    btn.classList.toggle('active', enabled);
+                    btn.innerHTML = enabled
+                        ? '<i class="fas fa-draw-polygon"></i> Drawing Area'
+                        : '<i class="fas fa-draw-polygon"></i> Draw Area';
+                }
+                if (finishBtn) finishBtn.disabled = !enabled;
+            },
+
+            setStatsAreaRectangle(startLatLng, endLatLng) {
+                const south = Math.min(startLatLng.lat, endLatLng.lat);
+                const north = Math.max(startLatLng.lat, endLatLng.lat);
+                const west = Math.min(startLatLng.lng, endLatLng.lng);
+                const east = Math.max(startLatLng.lng, endLatLng.lng);
+                this.statAreaPoints = [
+                    [south, west],
+                    [north, west],
+                    [north, east],
+                    [south, east]
+                ].map(([lat, lng]) => [Number(lat.toFixed(6)), Number(lng.toFixed(6))]);
+            },
+
+            addStatsAreaPoint(latlng, fromDrag = false) {
+                if (fromDrag && this.statAreaPoints.length > 0 && this.map) {
+                    const last = this.statAreaPoints[this.statAreaPoints.length - 1];
+                    const lastPoint = this.map.latLngToLayerPoint(L.latLng(last[0], last[1]));
+                    const nextPoint = this.map.latLngToLayerPoint(latlng);
+                    if (lastPoint.distanceTo(nextPoint) < 10) return;
+                }
+                this.statAreaPoints.push([Number(latlng.lat.toFixed(6)), Number(latlng.lng.toFixed(6))]);
+                this.renderStatsAreaDraft();
+            },
+
+            renderStatsAreaDraft() {
+                if (!this.statAreaLayer) return;
+                this.clearStatsAreaLayers();
+                if (this.statAreaPoints.length >= 3) {
+                    const draft = L.polygon(this.statAreaPoints, {
+                        color: '#00d4ff',
+                        weight: 3,
+                        dashArray: '8 6',
+                        fillColor: '#00d4ff',
+                        fillOpacity: 0.08,
+                        opacity: 0.95,
+                        interactive: false,
+                        pane: 'trafficStatsArea'
+                    }).addTo(this.statAreaLayer);
+                    this.statAreaDraft.push(draft);
+                    return;
+                }
+                this.statAreaPoints.forEach(point => {
+                    const marker = L.circleMarker(point, {
+                        radius: 5,
+                        color: '#00d4ff',
+                        weight: 2,
+                        fillColor: '#00d4ff',
+                        fillOpacity: 0.9,
+                        pane: 'trafficStatsArea'
+                    }).addTo(this.statAreaLayer);
+                    this.statAreaDraft.push(marker);
+                });
+                if (this.statAreaPoints.length > 1) {
+                    const draft = L.polyline(this.statAreaPoints, {
+                        color: '#00d4ff',
+                        weight: 3,
+                        dashArray: '8 6',
+                        opacity: 0.9,
+                        pane: 'trafficStatsArea'
+                    }).addTo(this.statAreaLayer);
+                    this.statAreaDraft.push(draft);
+                }
+            },
+
+            finishStatsArea() {
+                if (this.statAreaPoints.length < 3) {
+                    addLog('[Stats Area] Need at least 3 points');
+                    return;
+                }
+                this.renderStatsAreaSelection();
+                this.setStatsAreaMode(false);
+                this.updateRoadVolumes();
+                addLog('[Stats Area] Statistics scope switched to selected area');
+            },
+
+            renderStatsAreaSelection() {
+                if (!this.statAreaLayer || !this.statAreaDimLayer || this.statAreaPoints.length < 3) return;
+                this.statAreaLayer.clearLayers();
+                this.statAreaDimLayer.clearLayers();
+                this.createStatsAreaDimMask();
+                this.statAreaPolygon = L.polygon(this.statAreaPoints, {
+                    color: '#00d4ff',
+                    weight: 4,
+                    fillColor: '#00d4ff',
+                    fillOpacity: 0.06,
+                    opacity: 1,
+                    interactive: false,
+                    pane: 'trafficStatsArea'
+                }).addTo(this.statAreaLayer);
+            },
+
+            createStatsAreaDimMask() {
+                const outer = [
+                    [31.218, 121.496],
+                    [31.243, 121.496],
+                    [31.243, 121.534],
+                    [31.218, 121.534]
+                ];
+                L.polygon([outer, this.statAreaPoints], {
+                    color: 'transparent',
+                    weight: 0,
+                    fillColor: '#020617',
+                    fillOpacity: 0.52,
+                    fillRule: 'evenodd',
+                    interactive: false,
+                    pane: 'trafficStatsDim'
+                }).addTo(this.statAreaDimLayer);
+            },
+
+            clearStatsArea() {
+                this.statAreaPoints = [];
+                this.clearStatsAreaLayers();
+                this.statAreaPolygon = null;
+                this.setStatsAreaMode(false);
+                this.updateRoadVolumes();
+                addLog('[Stats Area] Statistics scope restored to full network');
+            },
+
+            clearStatsAreaLayers() {
+                this.statAreaDraft = [];
+                this.statAreaPolygon = null;
+                if (this.statAreaDimLayer) this.statAreaDimLayer.clearLayers();
+                if (this.statAreaLayer) this.statAreaLayer.clearLayers();
+            },
+
+            setAddIntersectionMode(enabled) {
+                this.addIntersectionMode = enabled;
+                if (enabled) {
+                    this.setStatsAreaMode(false);
+                    if (this.lineEditMode) this.setLineEditMode(false);
+                    addLog('[Map] Add intersection enabled; enter name and click the map');
+                }
+                const btn = document.getElementById('sumo-add-node-btn');
+                if (btn) {
+                    btn.classList.toggle('active', enabled);
+                    btn.innerHTML = enabled
+                        ? '<i class="fas fa-map-pin"></i> Adding 路口'
+                        : '<i class="fas fa-map-pin"></i> Add 路口';
+                }
+            },
+
+            addIntersectionAt(latlng) {
+                const input = document.getElementById('sumo-new-node-name');
+                const name = input ? input.value.trim() : '';
+                if (!name) {
+                    addLog('[Map] Please enter intersection name before adding');
+                    if (input) input.focus();
+                    return;
+                }
+                const id = this.generateIntersectionId();
+                const node = {
+                    id,
+                    name,
+                    lat: Number(latlng.lat.toFixed(6)),
+                    lng: Number(latlng.lng.toFixed(6)),
+                    pressure: 0.3
+                };
+                this.intersections.push(node);
+                this.createIntersectionMarker(node);
+                this.updateRoadVolumes();
+                addLog(`[Map] Added intersection ${id}: ${name}`);
+            },
+
+            generateIntersectionId() {
+                let next = this.intersections.reduce((max, node) => {
+                    const match = String(node.id).match(/(\d+)$/);
+                    return match ? Math.max(max, Number(match[1])) : max;
+                }, 0) + 1;
+                let id = `N${next}`;
+                while (this.intersections.some(node => node.id === id)) {
+                    next += 1;
+                    id = `N${next}`;
+                }
+                return id;
+            },
+
+            getManualCheck(id) {
+                return this.manualChecks.find(item => item.id === id);
+            },
+
+            createIntersectionIcon(id) {
+                const issue = this.getManualCheck(id);
+                const badge = issue ? '<div class="manual-badge"><i class="fas fa-user-check"></i></div>' : '';
+                const cls = issue ? 'manual' : 'low';
+                return L.divIcon({
+                    className: '',
+                    html: `<div class="tls-marker ${cls}" data-node-id="${id}" title="${issue ? issue.reason : ''}"><span>${id}</span>${badge}</div>`,
+                    iconSize: [34, 34],
+                    iconAnchor: [17, 17]
+                });
+            },
+
+            createPressureLinks() {
+                if (!this.pressureLayer) return;
+                this.pressureLayer.clearLayers();
+                this.linkById = {};
+                this.selectedLineId = null;
+                this.links.forEach(link => this.drawMapLine(link));
+            },
+
+            drawMapLine(link) {
+                if (!this.pressureLayer) return;
+                const byId = Object.fromEntries(this.intersections.map(n => [n.id, n]));
+                const a = byId[link.nodes[0]];
+                const b = byId[link.nodes[1]];
+                if (!a || !b) return;
+                const line = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
+                    color: this.selectedLineId === link.id ? '#00d4ff' : this.getVolumeColor(link.volume || 0),
+                    weight: this.selectedLineId === link.id ? 10 : this.getVolumeWeight(link.volume || 0),
+                    opacity: 0.78,
+                    interactive: true,
+                    bubblingMouseEvents: false,
+                    pane: 'trafficRoutes'
+                }).addTo(this.pressureLayer);
+                line.on('click', (event) => {
+                    if (!this.calibrationMode) return;
+                    if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+                    this.selectedLineId = link.id;
+                    this.refreshLineStyles();
+                    addLog(`[Map Calibration] Selected line ${link.nodes[0]} -> ${link.nodes[1]}`);
+                });
+                this.linkById[link.id] = line;
+            },
+
+            refreshLineStyles() {
+                this.links.forEach(link => {
+                    const line = this.linkById[link.id];
+                    if (!line) return;
+                    const selected = this.selectedLineId === link.id;
+                    line.setStyle({
+                        color: selected ? '#00d4ff' : this.getVolumeColor(link.volume || 0),
+                        weight: selected ? 10 : this.getVolumeWeight(link.volume || 0),
+                        opacity: selected ? 0.92 : 0.78
+                    });
+                });
+            },
+
+            updateRoadVolumes() {
+                const counts = {};
+                const scopedCounts = {};
+                const nodeCounts = {};
+                this.links.forEach(link => {
+                    counts[link.id] = 0;
+                    scopedCounts[link.id] = 0;
+                });
+                this.intersections.forEach(node => { nodeCounts[node.id] = 0; });
+                this.vehicles.forEach(vehicle => {
+                    if (!vehicle.active) return;
+                    if (counts[vehicle.linkId] !== undefined) counts[vehicle.linkId]++;
+                    if (scopedCounts[vehicle.linkId] !== undefined && this.isVehicleInScope(vehicle)) scopedCounts[vehicle.linkId]++;
+                    if (vehicle.progress < 0.2 && nodeCounts[vehicle.fromId] !== undefined) nodeCounts[vehicle.fromId]++;
+                    if (vehicle.progress > 0.8 && nodeCounts[vehicle.toId] !== undefined) nodeCounts[vehicle.toId]++;
+                });
+                this.links.forEach(link => {
+                    link.volume = counts[link.id] || 0;
+                });
+                this.refreshLineStyles();
+                this.updateNodeVolumes(nodeCounts);
+                this.updateNetworkStatus(scopedCounts, nodeCounts);
+            },
+
+            hasStatsArea() {
+                return this.statAreaPoints.length >= 3 && !!this.statAreaPolygon;
+            },
+
+            isPointInStatsArea(lat, lng) {
+                if (!this.hasStatsArea()) return true;
+                let inside = false;
+                const points = this.statAreaPoints;
+                for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                    const yi = points[i][0];
+                    const xi = points[i][1];
+                    const yj = points[j][0];
+                    const xj = points[j][1];
+                    const intersects = ((yi > lat) !== (yj > lat)) &&
+                        (lng < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-9) + xi);
+                    if (intersects) inside = !inside;
+                }
+                return inside;
+            },
+
+            getVehiclePosition(vehicle) {
+                const from = this.getIntersection(vehicle.fromId);
+                const to = this.getIntersection(vehicle.toId);
+                if (!from || !to) return null;
+                const t = Math.max(0, Math.min(1, vehicle.progress));
+                return {
+                    lat: from.lat + (to.lat - from.lat) * t,
+                    lng: from.lng + (to.lng - from.lng) * t
+                };
+            },
+
+            isVehicleInScope(vehicle) {
+                const pos = this.getVehiclePosition(vehicle);
+                return !!pos && this.isPointInStatsArea(pos.lat, pos.lng);
+            },
+
+            isLinkInScope(link) {
+                const from = this.getIntersection(link.nodes[0]);
+                const to = this.getIntersection(link.nodes[1]);
+                if (!from || !to) return false;
+                return this.isPointInStatsArea(from.lat, from.lng) ||
+                    this.isPointInStatsArea(to.lat, to.lng) ||
+                    this.isPointInStatsArea((from.lat + to.lat) / 2, (from.lng + to.lng) / 2);
+            },
+
+            getScopedIntersections() {
+                return this.intersections.filter(node => this.isPointInStatsArea(node.lat, node.lng));
+            },
+
+            getScopedLinks() {
+                return this.links.filter(link => this.isLinkInScope(link));
+            },
+
+            getDashboardScope() {
+                const scopedIntersections = this.getScopedIntersections();
+                const scopedLinks = this.getScopedLinks();
+                const hasArea = this.hasStatsArea();
+                if (!hasArea) {
+                    return {
+                        name: '全路网',
+                        factor: 1,
+                        source: 'sumo',
+                        intersections: this.intersections.length,
+                        links: this.links.length
+                    };
+                }
+                const nodeRatio = scopedIntersections.length / Math.max(1, this.intersections.length);
+                const linkRatio = scopedLinks.length / Math.max(1, this.links.length);
+                const factor = Math.max(0.16, Math.min(0.9, nodeRatio * 0.65 + linkRatio * 0.35));
+                return {
+                    name: `手绘区域 (${scopedIntersections.length}路口/${scopedLinks.length}路段)`,
+                    factor,
+                    source: 'sumo',
+                    intersections: scopedIntersections.length,
+                    links: scopedLinks.length
+                };
+            },
+
+            updateNodeVolumes(nodeCounts) {
+                Object.entries(this.markerById).forEach(([id, marker]) => {
+                    const el = marker.getElement();
+                    if (!el) return;
+                    const dot = el.querySelector('.tls-marker');
+                    if (!dot) return;
+                    dot.classList.remove('low', 'medium', 'high', 'node', 'manual');
+                    if (this.getManualCheck(id)) {
+                        dot.classList.add('manual');
+                        return;
+                    }
+                    dot.classList.add(this.getNodeVolumeClass(nodeCounts[id] || 0));
+                });
+            },
+
+            updateNetworkStatus(routeCounts = null, nodeCounts = null) {
+                if (!routeCounts) {
+                    routeCounts = {};
+                    this.links.forEach(link => { routeCounts[link.id] = link.volume || 0; });
+                }
+                if (!nodeCounts) {
+                    nodeCounts = {};
+                    this.intersections.forEach(node => { nodeCounts[node.id] = 0; });
+                }
+
+                const scopedLinks = this.getScopedLinks();
+                const scopedIntersections = this.getScopedIntersections();
+                const scopedNodeIds = new Set(scopedIntersections.map(node => node.id));
+                const scopedVehicles = this.vehicles.filter(vehicle => vehicle.active && this.isVehicleInScope(vehicle));
+                const routeValues = scopedLinks.map(link => routeCounts[link.id] || 0);
+                const congested = routeValues.filter(v => v >= 5).length;
+                const busy = routeValues.filter(v => v >= 3 && v < 5).length;
+                const normal = Math.max(0, routeValues.length - congested - busy);
+                const totalRoutes = Math.max(1, routeValues.length);
+                const activeVehicles = scopedVehicles.length;
+                const flow = Math.round(activeVehicles * 6 + Math.sin(this.step * 0.07) * 8 + 28);
+                const scopedManualChecks = this.manualChecks.filter(item => scopedNodeIds.has(item.id));
+                const manualCount = scopedManualChecks.length;
+                const signalOk = Math.max(0, scopedIntersections.length - manualCount);
+                const latency = Math.max(8, Math.round(12 + manualCount * 2 + Math.sin(this.step * 0.04) * 3));
+
+                this.setText('sumo-scope', this.hasStatsArea() ? 'Scope: 手绘区域' : 'Scope: 全路网');
+                this.setText('sumo-intersections-count', scopedIntersections.length);
+                this.setText('sumo-lights-count', scopedIntersections.length * 4);
+                this.setText('sumo-veh-count', activeVehicles);
+                this.setText('sumo-flow', flow);
+                this.setText('sumo-congested-count', congested);
+                this.setText('sumo-busy-count', busy);
+                this.setText('sumo-normal-count', normal);
+                this.setText('sumo-signal-ok', signalOk);
+                this.setText('sumo-manual-check', manualCount);
+                this.setText('sumo-softbus-latency', latency);
+                this.setWidth('sumo-congested-bar', congested / totalRoutes * 100);
+                this.setWidth('sumo-busy-bar', busy / totalRoutes * 100);
+                this.setWidth('sumo-normal-bar', normal / totalRoutes * 100);
+
+                const list = document.getElementById('sumo-manual-list');
+                if (list) {
+                    list.innerHTML = scopedManualChecks.length
+                        ? scopedManualChecks.map(item => {
+                            const node = this.getIntersection(item.id);
+                            return `<div><i class="fas fa-user-check"></i> ${item.id} ${node ? node.name : ''}: ${item.reason}</div>`;
+                        }).join('')
+                        : 'All intersections nominal';
+                }
+            },
+
+            setText(id, value) {
+                const el = document.getElementById(id);
+                if (el) el.textContent = value;
+            },
+
+            setWidth(id, value) {
+                const el = document.getElementById(id);
+                if (el) el.style.width = Math.max(0, Math.min(100, value)).toFixed(1) + '%';
+            },
+
+            getNodeVolumeClass(count) {
+                if (count >= 5) return 'high';
+                if (count >= 3) return 'medium';
+                return 'low';
+            },
+
+            getVolumeColor(count) {
+                if (count >= 5) return '#ff4d4f';
+                if (count >= 3) return '#faad14';
+                return '#52c41a';
+            },
+
+            getVolumeWeight(count) {
+                return Math.min(12, 5 + count * 1.2);
+            },
+
+            createVehicles() {
+                this.clearVehicles();
+                this.vehicles = [];
+                if (!this.vehicleLayer) return;
+                if (this.links.length === 0) {
+                    addLog('[SUMO] No map links configured; add lines before starting traffic flow');
+                    return;
+                }
+                for (let i = 0; i < this.vehicleCount; i++) {
+                    const start = this.pickVehicleRoute();
+                    if (!start) continue;
+                    const from = this.getIntersection(start.fromId);
+                    if (!from) continue;
+                    const marker = L.marker([from.lat, from.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="vehicle-pulse"></div>',
+                            iconSize: [8, 8],
+                            iconAnchor: [4, 4]
+                        }),
+                        interactive: false,
+                        pane: 'trafficVehicles'
+                    }).addTo(this.vehicleLayer);
+                    const vehicle = {
+                        marker,
+                        ...start,
+                        active: false,
+                        spawnDelay: i < Math.min(18, this.vehicleCount) ? 0 : Math.random() * 80,
+                        progress: 0,
+                        speed: 0.003 + Math.random() * 0.004
+                    };
+                    marker.setOpacity(0);
+                    marker.setLatLng([from.lat, from.lng]);
+                    this.vehicles.push(vehicle);
+                }
+            },
+
+            getIntersection(id) {
+                return this.intersections.find(item => item.id === id);
+            },
+
+            pickVehicleRoute() {
+                if (this.links.length === 0) return null;
+                const link = this.links[Math.floor(Math.random() * this.links.length)];
+                const reverse = Math.random() > 0.5;
+                return {
+                    linkId: link.id,
+                    fromId: reverse ? link.nodes[1] : link.nodes[0],
+                    toId: reverse ? link.nodes[0] : link.nodes[1]
+                };
+            },
+
+            resetVehicleRoute(vehicle) {
+                const route = this.pickVehicleRoute();
+                if (!route) return false;
+                Object.assign(vehicle, route);
+                vehicle.progress = 0;
+                vehicle.speed = 0.003 + Math.random() * 0.004;
+                const from = this.getIntersection(vehicle.fromId);
+                if (from) vehicle.marker.setLatLng([from.lat, from.lng]);
+                return true;
+            },
+
+            positionVehicleOnRoute(vehicle) {
+                const from = this.getIntersection(vehicle.fromId);
+                const to = this.getIntersection(vehicle.toId);
+                if (!from || !to) {
+                    this.resetVehicleRoute(vehicle);
+                    return;
+                }
+                const t = Math.max(0, Math.min(1, vehicle.progress));
+                const lat = from.lat + (to.lat - from.lat) * t;
+                const lng = from.lng + (to.lng - from.lng) * t;
+                vehicle.marker.setLatLng([lat, lng]);
+            },
+
+            clearVehicles() {
+                this.vehicles = [];
+                if (this.vehicleLayer) this.vehicleLayer.clearLayers();
             },
 
             tick(now) {
@@ -2478,40 +4638,34 @@
                 this.step += this.speed;
                 if (this.step > this.maxStep) this.step = this.maxStep;
 
-                // 信号灯切换: 每 30 步
-                if (this.step % 30 < this.speed) {
-                    this.nodes.forEach(n => {
-                        const s = Math.random() > 0.4 ? 'green' : 'red';
-                        n.state = s;
-                        n.el.setAttribute('fill', s === 'green' ? '#52c41a' : '#ff4d4f');
-                    });
-                }
-
-                // 更新车辆位置
                 this.vehicles.forEach(v => {
-                    if (v.isRing) {
-                        v.angle = (v.angle + v.speed * 0.5) % 360;
-                        const rad = v.angle * Math.PI / 180;
-                        const x = 300 + v.ring * Math.sin(rad) - 4;
-                        const y = 300 - v.ring * Math.cos(rad) - 2;
-                        v.el.setAttribute('x', x);
-                        v.el.setAttribute('y', y);
-                        v.el.setAttribute('transform', `rotate(${v.angle + 90} ${x+4} ${y+2})`);
+                    if (!v.active) {
+                        v.spawnDelay -= this.speed;
+                        if (v.spawnDelay <= 0 && this.resetVehicleRoute(v)) {
+                            v.active = true;
+                            v.marker.setOpacity(1);
+                        }
+                        return;
+                    }
+                    v.progress += v.speed * this.speed;
+                    if (v.progress >= 1) {
+                        v.active = false;
+                        v.marker.setOpacity(0);
+                        v.spawnDelay = 12 + Math.random() * 45;
                     } else {
-                        v.radialPos += v.speed * 0.8;
-                        if (v.radialPos > 280) v.radialPos = 50;
-                        const rad = v.radialAngle * Math.PI / 180;
-                        const x = 300 + v.radialPos * Math.sin(rad) - 4;
-                        const y = 300 - v.radialPos * Math.cos(rad) - 2;
-                        v.el.setAttribute('x', x);
-                        v.el.setAttribute('y', y);
-                        v.el.setAttribute('transform', `rotate(${v.radialAngle + 90} ${x+4} ${y+2})`);
+                        this.positionVehicleOnRoute(v);
                     }
                 });
+                this.updateRoadVolumes();
 
                 this.updateUI();
 
                 if (this.step >= this.maxStep) {
+                    if (this.autoLoop && !this.calibrationMode) {
+                        this.restartLoopCycle();
+                        this._animFrame = requestAnimationFrame(t => this.tick(t));
+                        return;
+                    }
                     this.running = false;
                     document.getElementById('sumo-status').textContent = 'Completed';
                     document.getElementById('sumo-status').style.color = 'var(--success)';
@@ -2521,12 +4675,24 @@
                 }
             },
 
+            restartLoopCycle() {
+                this.step = 0;
+                this.clearVehicles();
+                this.createVehicles();
+                this.updateRoadVolumes();
+                this.updateUI();
+                document.getElementById('sumo-status').textContent = 'Running...';
+                document.getElementById('sumo-status').style.color = 'var(--accent)';
+                document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-pause"></i> Pause';
+            },
+
             updateUI() {
                 document.getElementById('sumo-step').textContent = Math.min(this.step, this.maxStep);
                 document.getElementById('sumo-progress').style.width = ((this.step / this.maxStep) * 100).toFixed(1) + '%';
                 const avgSpeed = (18 + Math.sin(this.step * 0.05) * 6 + Math.random() * 3).toFixed(1);
                 document.getElementById('sumo-avg-speed').textContent = avgSpeed;
-                const stopped = Math.floor(this.vehicles.length * (0.1 + Math.sin(this.step * 0.03) * 0.08));
+                const scopedVehicleCount = this.vehicles.filter(v => v.active && this.isVehicleInScope(v)).length;
+                const stopped = Math.floor(scopedVehicleCount * (0.1 + Math.sin(this.step * 0.03) * 0.08));
                 document.getElementById('sumo-stopped').textContent = Math.max(0, stopped);
                 // 动态更新对比数据
                 if (this.step > 100) {
@@ -2538,7 +4704,9 @@
             },
 
             start() {
+                if (this.running) return;
                 if (this.step >= this.maxStep) this.init();
+                if (this.vehicles.length === 0) this.createVehicles();
                 this.running = true;
                 this._lastTick = 0;
                 document.getElementById('sumo-status').textContent = 'Running...';
@@ -2553,11 +4721,22 @@
                 document.getElementById('sumo-status').textContent = 'Paused';
                 document.getElementById('sumo-status').style.color = 'var(--warning)';
                 document.getElementById('sumo-play-btn').innerHTML = '<i class="fas fa-play"></i> Resume';
+            },
+
+            resizeMap() {
+                if (this.map) setTimeout(() => this.map.invalidateSize(), 50);
             }
         };
 
         function startSimulation() {
             SUMO.init();
+            SUMO.start();
+        }
+
+        function openIntersectionMonitor(intersectionId) {
+            const monitorNav = document.querySelector(".nav-item[onclick*=\"showPage('monitor'\"]");
+            showPage('monitor', monitorNav);
+            addLog(`[Map] Open monitor view for intersection ${intersectionId}`);
         }
 
         function toggleSim() {
@@ -2570,15 +4749,41 @@
             SUMO.init();
         }
 
+        function toggleMapCalibration() {
+            SUMO.setCalibrationMode(!SUMO.calibrationMode);
+        }
+
+        function toggleLineEditMode() {
+            SUMO.setLineEditMode(!SUMO.lineEditMode);
+        }
+
+        function deleteSelectedMapLine() {
+            SUMO.deleteSelectedLine();
+        }
+
+        function toggleStatsAreaMode() {
+            SUMO.setStatsAreaMode(!SUMO.statAreaMode);
+        }
+
+        function finishStatsArea() {
+            SUMO.finishStatsArea();
+        }
+
+        function clearStatsArea() {
+            SUMO.clearStatsArea();
+        }
+
+        function toggleAddIntersectionMode() {
+            SUMO.setAddIntersectionMode(!SUMO.addIntersectionMode);
+        }
+
+        async function saveMapCalibration() {
+            await SUMO.saveMapConfig();
+        }
+
         function applySumoScenario(scenario) {
             SUMO.pause();
-            // 清除标记
-            document.getElementById('sumo-markers').innerHTML = '';
-            const ringsG = document.getElementById('sumo-rings');
-            Array.from(ringsG.children).forEach(c => {
-                c.setAttribute('stroke', 'url(#roadGrad)');
-                c.removeAttribute('stroke-dasharray');
-            });
+            if (SUMO.scenarioLayer) SUMO.scenarioLayer.clearLayers();
 
             if (scenario === 'peak') {
                 SUMO.vehicleCount = 50;
@@ -2587,50 +4792,46 @@
                 SUMO.vehicleCount = 30;
                 document.getElementById('sumo-veh-count').textContent = '30';
                 SUMO.init();
-                // 在第3环+第2放射交叉点标记事故
-                const accNode = SUMO.nodes[2 * 8 + 1]; // ring 2, angle 1
-                if (accNode) {
-                    accNode.el.setAttribute('fill', '#ff9500');
-                    accNode.el.setAttribute('r', 10);
-                    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    marker.setAttribute('x', accNode.x);
-                    marker.setAttribute('y', accNode.y - 14);
-                    marker.setAttribute('text-anchor', 'middle');
-                    marker.setAttribute('fill', '#ff4d4f');
-                    marker.setAttribute('font-size', '18');
-                    marker.textContent = '⚠';
-                    document.getElementById('sumo-markers').appendChild(marker);
-                    // 事故区域高亮环
-                    const accRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    accRing.setAttribute('cx', accNode.x);
-                    accRing.setAttribute('cy', accNode.y);
-                    accRing.setAttribute('r', 25);
-                    accRing.setAttribute('fill', 'none');
-                    accRing.setAttribute('stroke', '#ff4d4f');
-                    accRing.setAttribute('stroke-width', '2');
-                    accRing.setAttribute('stroke-dasharray', '5 3');
-                    accRing.setAttribute('opacity', '0.6');
-                    document.getElementById('sumo-markers').appendChild(accRing);
+                const accNode = SUMO.nodes.find(n => n.id === 'E5');
+                if (accNode && SUMO.scenarioLayer) {
+                    L.circle([accNode.lat, accNode.lng], {
+                        radius: 110,
+                        color: '#ff4d4f',
+                        weight: 2,
+                        dashArray: '6 4',
+                        fillColor: '#ff4d4f',
+                        fillOpacity: 0.12
+                    }).addTo(SUMO.scenarioLayer);
+                    L.marker([accNode.lat, accNode.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="font-size:22px; text-shadow:0 2px 8px rgba(0,0,0,0.45);">⚠</div>',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        })
+                    }).addTo(SUMO.scenarioLayer);
                 }
                 return;
             } else if (scenario === 'roadwork') {
                 SUMO.vehicleCount = 40;
                 document.getElementById('sumo-veh-count').textContent = '40';
                 SUMO.init();
-                // 第3环标记施工
-                const ring3 = ringsG.children[2];
-                ring3.setAttribute('stroke', '#f97316');
-                ring3.setAttribute('stroke-dasharray', '20 10');
-                // 施工标记文字
-                const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                txt.setAttribute('x', 300);
-                txt.setAttribute('y', 300 - 160 - 16);
-                txt.setAttribute('text-anchor', 'middle');
-                txt.setAttribute('fill', '#f97316');
-                txt.setAttribute('font-size', '11');
-                txt.setAttribute('font-family', 'Consolas');
-                txt.textContent = '🚧 CONSTRUCTION';
-                document.getElementById('sumo-markers').appendChild(txt);
+                if (SUMO.scenarioLayer) {
+                    L.polyline([[31.22662, 121.51336], [31.22642, 121.52604]], {
+                        color: '#f97316',
+                        weight: 9,
+                        opacity: 0.85,
+                        dashArray: '12 8'
+                    }).addTo(SUMO.scenarioLayer);
+                    L.marker([31.22652, 121.5200], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="padding:3px 7px; background:#f97316; color:#111; border-radius:4px; font:700 10px Consolas; box-shadow:0 3px 10px rgba(0,0,0,0.35);">CONSTRUCTION</div>',
+                            iconSize: [92, 18],
+                            iconAnchor: [46, 9]
+                        })
+                    }).addTo(SUMO.scenarioLayer);
+                }
                 return;
             }
             SUMO.init();
